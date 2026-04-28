@@ -1,4 +1,7 @@
-"""Generate XRobot/LibXR module repositories from parsed DSDL types."""
+"""从已解析的 DSDL 类型生成 XRobot/LibXR 模块仓库。
+
+Generate XRobot/LibXR module repositories from parsed DSDL types.
+"""
 
 from __future__ import annotations
 
@@ -123,7 +126,7 @@ class ModuleRenderer:
 """
 
     def render_info_cmake(self) -> str:
-        return f"# Generated DroneCAN DSDL XRobot module: {self.cfg.module_name}\n"
+        return f"# 已生成的 DroneCAN DSDL XRobot 模块 / Generated DroneCAN DSDL XRobot module: {self.cfg.module_name}\n"
 
     def render_module_header(self) -> str:
         pascal_alias = to_pascal(self.cfg.module_name)
@@ -157,13 +160,15 @@ using {pascal_alias} = {self.cfg.class_name};
         type_list = "\n".join(f"- `{item.full_name}`" for item in self.types)
         return f"""# {self.cfg.module_name}
 
+已生成的 XRobot/LibXR DroneCAN 模块。
+
 Generated XRobot/LibXR DroneCAN module.
 
-## DSDL Types
+## DSDL 类型 / DSDL Types
 
 {type_list}
 
-## XRobot Example
+## XRobot 示例 / XRobot Example
 
 ```yaml
 modules:
@@ -176,6 +181,9 @@ modules:
       node_name: {self.cfg.node_name}
       node_status_period_ms: {self.cfg.default_node_status_period_ms}
 ```
+
+该模块持有一个 `DroneCANCoreSupport::DroneCANNode`，通过 `OnMonitor()` 轮询，
+并暴露类型化的发布、请求、响应方法，以及可选的接收传输回调。
 
 The module owns a `DroneCANCoreSupport::DroneCANNode`, polls it from
 `OnMonitor()`, and exposes typed publish/request/respond methods plus optional
@@ -237,7 +245,7 @@ extern "C"
 class {self.cfg.class_name} final : public LibXR::Application
 {{
  public:
-{chr(10).join(callback_lines) if callback_lines else "  // No default data type IDs were selected; no transfer handlers are generated."}
+{chr(10).join(callback_lines) if callback_lines else "  // 未选择默认数据类型 ID，因此不会生成传输处理器。 / No default data type IDs were selected; no transfer handlers are generated."}
 
   {self.cfg.class_name}(LibXR::HardwareContainer& hw,
                         LibXR::ApplicationManager& appmgr,

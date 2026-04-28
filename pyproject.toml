@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "xrobot-dronecan-dsdlc"
 version = "0.1.0"
-description = "DroneCAN DSDL compiler that emits XRobot/LibXR module repositories"
+description = "生成 XRobot/LibXR 模块仓库的 DroneCAN DSDL 编译器 / DroneCAN DSDL compiler that emits XRobot/LibXR module repositories"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [

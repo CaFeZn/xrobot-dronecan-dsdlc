@@ -1,4 +1,7 @@
-"""Name conversion helpers for generated C++ and XRobot module files."""
+"""生成 C++ 和 XRobot 模块文件时使用的命名转换辅助函数。
+
+Name conversion helpers for generated C++ and XRobot module files.
+"""
 
 from __future__ import annotations
 

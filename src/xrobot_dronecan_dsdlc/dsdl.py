@@ -1,4 +1,7 @@
-"""DSDL loading and dependency helpers."""
+"""DSDL 加载和依赖处理辅助函数。
+
+DSDL loading and dependency helpers.
+"""
 
 from __future__ import annotations
 

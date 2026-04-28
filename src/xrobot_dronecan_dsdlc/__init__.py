@@ -1,4 +1,7 @@
-"""DroneCAN DSDL compiler for XRobot/LibXR modules."""
+"""面向 XRobot/LibXR 模块的 DroneCAN DSDL 编译器。
+
+DroneCAN DSDL compiler for XRobot/LibXR modules.
+"""
 
 __all__ = ["__version__"]
 

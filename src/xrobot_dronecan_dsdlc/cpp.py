@@ -1,4 +1,7 @@
-"""C++ code generation for DroneCAN DSDL types."""
+"""DroneCAN DSDL 类型的 C++ 代码生成。
+
+C++ code generation for DroneCAN DSDL types.
+"""
 
 from __future__ import annotations
 
