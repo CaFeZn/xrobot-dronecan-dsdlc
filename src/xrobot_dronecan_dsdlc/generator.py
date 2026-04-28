@@ -53,13 +53,16 @@ class ModuleRenderer:
 
     def write(self) -> None:
         out = self.cfg.output
+        include_dir = out / "include" / self.cfg.module_name
         out.mkdir(parents=True, exist_ok=True)
+        include_dir.mkdir(parents=True, exist_ok=True)
 
         self._write(out / "module.yaml", self.render_module_yaml())
         self._write(out / "CMakeLists.txt", self.render_cmake())
         self._write(out / "info.cmake", self.render_info_cmake())
         self._write(out / "README.md", self.render_readme())
         self._write(out / f"{self.cfg.module_name}.hpp", self.render_module_header())
+        self._write(include_dir / f"{self.cfg.module_name}_generated.hpp", self.render_generated_header())
 
     @staticmethod
     def _write(path: Path, text: str) -> None:
@@ -122,6 +125,7 @@ class ModuleRenderer:
     def render_cmake(self) -> str:
         return """target_include_directories(xr PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}
+  ${CMAKE_CURRENT_LIST_DIR}/include
 )
 """
 
@@ -130,30 +134,40 @@ class ModuleRenderer:
 
     def render_module_header(self) -> str:
         pascal_alias = to_pascal(self.cfg.module_name)
-        types_header = render_types_header(self.cfg.root_namespace, self.types).removeprefix("#pragma once\n\n")
         return f"""#pragma once
 
-/* === MODULE MANIFEST V2 ===
-name: {self.cfg.module_name}
-class_name: {self.cfg.class_name}
-header: {self.cfg.module_name}.hpp
+// clang-format off
+{self.render_manifest()}
+// clang-format on
+
+#include "{self.cfg.module_name}/{self.cfg.module_name}_generated.hpp"
+
+using {self.cfg.module_name} = {self.cfg.class_name};
+using {pascal_alias} = {self.cfg.class_name};
+"""
+
+    def render_manifest(self) -> str:
+        return f"""/* === MODULE MANIFEST V2 ===
+module_description: 由 DroneCAN DSDL 生成的 XRobot/LibXR 模块 / Generated XRobot/LibXR module from DroneCAN DSDL
 constructor_args:
   node_id: {self.cfg.default_node_id}
   can_alias: can0
   timebase_alias: timebase
   node_name: {self.cfg.node_name}
   node_status_period_ms: {self.cfg.default_node_status_period_ms}
-root_namespace: {self.cfg.root_namespace}
-=== END MANIFEST === */
+depends:
+  - dronecan_core
+=== END MANIFEST === */"""
+
+    def render_generated_header(self) -> str:
+        types_header = render_types_header(self.cfg.root_namespace, self.types).removeprefix("#pragma once\n\n")
+        return f"""#pragma once
 
 {types_header}
 
 {self.render_class_header()}
 
 {self.render_class_source()}
-
-using {self.cfg.module_name} = {self.cfg.class_name};
-using {pascal_alias} = {self.cfg.class_name};
 """
 
     def render_readme(self) -> str:
@@ -167,6 +181,13 @@ Generated XRobot/LibXR DroneCAN module.
 ## DSDL 类型 / DSDL Types
 
 {type_list}
+
+## 模块布局 / Module Layout
+
+- `{self.cfg.module_name}.hpp`: XRobot 入口门面，包含 manifest、include 和 using 别名。
+- `{self.cfg.module_name}.hpp`: XRobot entry facade with manifest, include, and using aliases.
+- `include/{self.cfg.module_name}/{self.cfg.module_name}_generated.hpp`: header-only 生成实现。
+- `include/{self.cfg.module_name}/{self.cfg.module_name}_generated.hpp`: header-only generated implementation.
 
 ## XRobot 示例 / XRobot Example
 
