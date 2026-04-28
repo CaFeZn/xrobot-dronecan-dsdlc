@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xrobot-dronecan-dsdlc"
+version = "0.1.0"
+description = "DroneCAN DSDL compiler that emits XRobot/LibXR module repositories"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "dronecan>=1.0.27,<2",
+  "PyYAML>=6.0",
+]
+authors = [
+  { name = "CaFeZn" },
+]
+license = { text = "MIT" }
+
+[project.scripts]
+xr_dronecan_dsdlc = "xrobot_dronecan_dsdlc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
