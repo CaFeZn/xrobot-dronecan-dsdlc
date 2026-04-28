@@ -10,10 +10,9 @@ The compiler reads DroneCAN/UAVCAN v0 `.uavcan` DSDL definitions and emits an
 XRobot module repository layout:
 
 - `module.yaml`
-- 简洁的根级 `{module_name}.hpp` 门面 / concise root `{module_name}.hpp` facade
-- `include/{module_name}/{module_name}_generated.hpp`
+- 根级单文件 `{module_name}.hpp` / root single-file `{module_name}.hpp`
 - `CMakeLists.txt`
-- 内部 header-only C++ DSDL 编解码器和 `Application` 包装类 / internal header-only C++ DSDL codecs and an `Application` wrapper
+- 同一个根头文件内的 C++ DSDL 编解码器和 `Application` 包装类 / C++ DSDL codecs and an `Application` wrapper in the same root header
 
 生成的 C++ 模块依赖现有 `dronecan_core` 模块提供 LibXR CAN 桥接和 libcanard 运行时。
 
