@@ -1,7 +1,16 @@
 from pathlib import Path
 
+import pytest
+import yaml
+
 from xrobot_dronecan_dsdlc.dsdl import load_dsdl
 from xrobot_dronecan_dsdlc.generator import GenerationConfig, generate_module
+
+
+def _load_manifest(module_hpp: str) -> dict:
+    start = "/* === MODULE MANIFEST V2 ===\n"
+    end = "\n=== END MANIFEST === */"
+    return yaml.safe_load(module_hpp.split(start, 1)[1].split(end, 1)[0])
 
 
 def test_builtin_esc_signatures_match_dronecan_v0():
@@ -68,3 +77,203 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "kDataTypeId = 1030U" in module_hpp
     assert "0x217F5C87D7EC951DULL" in module_hpp
     assert "std::array<std::int16_t, 20U> cmd" in module_hpp
+
+
+def test_generation_rejects_invalid_cpp_names(tmp_path: Path):
+    with pytest.raises(ValueError, match="module_name"):
+        GenerationConfig(
+            output=tmp_path / "dronecan-bad",
+            module_name="dronecan-bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+        )
+
+    with pytest.raises(ValueError, match="class_name"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="class",
+            root_namespace="DroneCANBadTypes",
+        )
+
+    with pytest.raises(ValueError, match="root_namespace"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCAN-Bad",
+        )
+
+    with pytest.raises(ValueError, match="default_node_id"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+            default_node_id=128,
+        )
+
+    with pytest.raises(ValueError, match="module_name"):
+        GenerationConfig(
+            output=tmp_path / "__bad",
+            module_name="__bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+        )
+
+
+def test_generation_rejects_unsafe_xrobot_configuration(tmp_path: Path):
+    with pytest.raises(ValueError, match="output directory name"):
+        GenerationConfig(
+            output=tmp_path / "folder_name",
+            module_name="module_name",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+        )
+
+    with pytest.raises(ValueError, match="default_node_status_period_ms"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+            default_node_status_period_ms=0,
+        )
+
+    with pytest.raises(ValueError, match="node_name"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+            node_name="org.libxr.bad*/comment",
+        )
+
+    with pytest.raises(ValueError, match="node_name"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+            node_name="org.libxr.bad\nname",
+        )
+
+    with pytest.raises(ValueError, match="node_name"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+            node_name='org.libxr."bad"',
+        )
+
+
+def test_generated_node_name_is_yaml_and_cpp_safe(tmp_path: Path):
+    dsdl_set = load_dsdl([], include_builtin=True)
+    selected = dsdl_set.select_with_dependencies(["uavcan.protocol.NodeStatus"])
+    cfg = GenerationConfig(
+        output=tmp_path / "dronecan_node_status",
+        module_name="dronecan_node_status",
+        class_name="DroneCANNodeStatus",
+        root_namespace="DroneCANNodeStatusTypes",
+        node_name="org.libxr.test-node_1",
+    )
+
+    generate_module(cfg, selected)
+
+    module_hpp = (cfg.output / "dronecan_node_status.hpp").read_text(encoding="utf-8")
+    manifest = _load_manifest(module_hpp)
+    constructor_args = {}
+    for item in manifest["constructor_args"]:
+        constructor_args.update(item)
+
+    assert constructor_args["node_name"] == "org.libxr.test-node_1"
+    assert 'const char* node_name = "org.libxr.test-node_1"' in module_hpp
+
+
+def test_alias_collisions_are_not_emitted(tmp_path: Path):
+    dsdl_set = load_dsdl([], include_builtin=True)
+    selected = dsdl_set.select_with_dependencies(["uavcan.protocol.NodeStatus"])
+
+    cfg = GenerationConfig(
+        output=tmp_path / "foo",
+        module_name="foo",
+        class_name="Foo",
+        root_namespace="FooTypes",
+    )
+    generate_module(cfg, selected)
+    module_hpp = (cfg.output / "foo.hpp").read_text(encoding="utf-8")
+
+    assert "class Foo final" in module_hpp
+    assert "using foo = Foo;" in module_hpp
+    assert "using Foo = Foo;" not in module_hpp
+
+
+def test_nested_compound_tao_and_bounds_generation(tmp_path: Path):
+    dsdl_set = load_dsdl([], include_builtin=True)
+    selected = dsdl_set.select_with_dependencies(["uavcan.protocol.GetNodeInfo"])
+    cfg = GenerationConfig(
+        output=tmp_path / "dronecan_get_node_info",
+        module_name="dronecan_get_node_info",
+        class_name="DroneCANGetNodeInfo",
+        root_namespace="DroneCANGetNodeInfoTypes",
+    )
+
+    generate_module(cfg, selected)
+    module_hpp = (cfg.output / "dronecan_get_node_info.hpp").read_text(encoding="utf-8")
+
+    assert "CanWriteBits(std::size_t buffer_size" in module_hpp
+    assert "HardwareVersion::EncodeTo(msg.hardware_version, buffer, buffer_size, bit_offset, false)" in module_hpp
+    assert "HardwareVersion::DecodeFrom(transfer, bit_offset, out.hardware_version, false)" in module_hpp
+    assert "SoftwareVersion::EncodeTo(msg.software_version, buffer, buffer_size, bit_offset, false)" in module_hpp
+    assert "if (!detail::CanWriteBits(buffer_size, bit_offset" in module_hpp
+
+
+def test_union_tag_and_service_tao_generation(tmp_path: Path):
+    dsdl_set = load_dsdl([], include_builtin=True)
+    selected = dsdl_set.select_with_dependencies(["uavcan.protocol.param.GetSet"])
+    cfg = GenerationConfig(
+        output=tmp_path / "dronecan_param_getset",
+        module_name="dronecan_param_getset",
+        class_name="DroneCANParamGetSet",
+        root_namespace="DroneCANParamGetSetTypes",
+    )
+
+    generate_module(cfg, selected)
+    module_hpp = (cfg.output / "dronecan_param_getset.hpp").read_text(encoding="utf-8")
+
+    assert "if (msg.union_tag >" in module_hpp
+    assert "Value::EncodeTo(msg.value, buffer, buffer_size, bit_offset, false)" in module_hpp
+    assert "Value::DecodeFrom(transfer, bit_offset, out.value, false)" in module_hpp
+
+
+def test_generation_rejects_dsdl_cpp_identifier_conflicts(tmp_path: Path):
+    field_root = tmp_path / "testns"
+    field_root.mkdir()
+    (field_root / "20000.BadField.uavcan").write_text("uint8 class\n", encoding="utf-8")
+    field_set = load_dsdl([field_root])
+    field_selected = field_set.select_with_dependencies(["testns.BadField"])
+    field_cfg = GenerationConfig(
+        output=tmp_path / "dronecan_bad_field",
+        module_name="dronecan_bad_field",
+        class_name="DroneCANBadField",
+        root_namespace="DroneCANBadFieldTypes",
+    )
+
+    with pytest.raises(ValueError, match="DSDL field name"):
+        generate_module(field_cfg, field_selected)
+
+    namespace_root = tmp_path / "class"
+    namespace_root.mkdir()
+    (namespace_root / "20001.BadNamespace.uavcan").write_text("uint8 value\n", encoding="utf-8")
+    namespace_set = load_dsdl([namespace_root])
+    namespace_selected = namespace_set.select_with_dependencies(["class.BadNamespace"])
+    namespace_cfg = GenerationConfig(
+        output=tmp_path / "dronecan_bad_namespace",
+        module_name="dronecan_bad_namespace",
+        class_name="DroneCANBadNamespace",
+        root_namespace="DroneCANBadNamespaceTypes",
+    )
+
+    with pytest.raises(ValueError, match="DSDL namespace component"):
+        generate_module(namespace_cfg, namespace_selected)

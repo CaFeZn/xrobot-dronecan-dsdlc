@@ -11,8 +11,7 @@ from typing import Iterable
 
 from dronecan.dsdl import ArrayType, CompoundType, Constant, Field, PrimitiveType, Type, VoidType
 
-from .dsdl import type_max_payload_bytes
-from .naming import namespace_components, short_type_name
+from .naming import is_cpp_identifier, is_cpp_qualified_identifier, namespace_components, short_type_name
 
 
 def _bits_to_bytes(bits: int) -> int:
@@ -58,6 +57,7 @@ class CppTypeRenderer:
     def __init__(self, root_namespace: str, types: Iterable[CompoundType]):
         self.root_namespace = root_namespace
         self.types = list(types)
+        self._validate_cpp_identifiers()
 
     def render(self) -> str:
         parts = [
@@ -111,9 +111,21 @@ inline bool DecodeScalar(const CanardRxTransfer& transfer,
   return canardDecodeScalar(&transfer, bit_offset, bit_length, is_signed, out_value) == bit_length;
 }
 
+inline bool CanWriteBits(std::size_t buffer_size, std::uint32_t bit_offset, std::uint32_t bit_length) noexcept
+{
+  const std::uint64_t capacity_bits = static_cast<std::uint64_t>(buffer_size) * 8ULL;
+  const std::uint64_t offset = static_cast<std::uint64_t>(bit_offset);
+  return (offset <= capacity_bits) && (static_cast<std::uint64_t>(bit_length) <= (capacity_bits - offset));
+}
+
 inline std::uint32_t PayloadBitLength(const CanardRxTransfer& transfer) noexcept
 {
   return static_cast<std::uint32_t>(transfer.payload_len) * 8U;
+}
+
+inline std::uint32_t RemainingBits(std::uint32_t payload_bit_length, std::uint32_t bit_offset) noexcept
+{
+  return (payload_bit_length > bit_offset) ? (payload_bit_length - bit_offset) : 0U;
 }
 
 template <typename T>
@@ -124,6 +136,23 @@ inline T Clamp(T value, T low, T high) noexcept
 }  // namespace detail""",
             0,
         )
+
+    def _validate_cpp_identifiers(self) -> None:
+        if not is_cpp_qualified_identifier(self.root_namespace):
+            raise ValueError(f"root_namespace must be a valid C++ namespace identifier: {self.root_namespace!r}")
+        for compound in self.types:
+            for component in namespace_components(compound.full_name):
+                if not is_cpp_identifier(component):
+                    raise ValueError(f"DSDL namespace component is not a valid C++ identifier: {component!r}")
+            for spec in self._struct_specs(compound):
+                if not is_cpp_identifier(spec.name):
+                    raise ValueError(f"DSDL type name is not a valid C++ identifier: {spec.name!r}")
+                for field in spec.fields:
+                    if field.name and not is_cpp_identifier(field.name):
+                        raise ValueError(f"DSDL field name is not a valid C++ identifier: {field.name!r}")
+                for const in spec.constants:
+                    if not is_cpp_identifier(const.name):
+                        raise ValueError(f"DSDL constant name is not a valid C++ identifier: {const.name!r}")
 
     def _render_compound(self, compound: CompoundType) -> str:
         namespace = "::".join([self.root_namespace, *namespace_components(compound.full_name)])
@@ -271,7 +300,10 @@ inline T Clamp(T value, T low, T high) noexcept
             "",
             f"inline bool {spec.name}::EncodeTo(const {spec.name}& msg, std::uint8_t* buffer, std::size_t buffer_size, std::uint32_t& bit_offset, bool tao) noexcept",
             "{",
-            "  (void)buffer_size;",
+            "  if (buffer == nullptr)",
+            "  {",
+            "    return false;",
+            "  }",
         ]
         lines.extend(_indent(self._render_encode_fields(spec), 1).splitlines())
         lines.append("  return true;")
@@ -295,6 +327,7 @@ inline T Clamp(T value, T low, T high) noexcept
             return "(void)msg;\n(void)buffer;\n(void)tao;"
         if spec.is_union:
             tag_bits = max(len(fields) - 1, 1).bit_length()
+            max_tag = max(len(fields) - 1, 0)
             cases = [
                 f"case {idx}U:\n{_indent(self._encode_field(field, is_tail=True), 1)}\n  break;"
                 for idx, field in enumerate(fields)
@@ -302,7 +335,15 @@ inline T Clamp(T value, T low, T high) noexcept
             return "\n".join(
                 [
                     "{",
-                    f"  std::uint8_t tag = static_cast<std::uint8_t>(std::min<std::uint8_t>(msg.union_tag, {max(len(fields)-1, 0)}U));",
+                    f"  if (msg.union_tag > {max_tag}U)",
+                    "  {",
+                    "    return false;",
+                    "  }",
+                    "  const std::uint8_t tag = msg.union_tag;",
+                    f"  if (!detail::CanWriteBits(buffer_size, bit_offset, {tag_bits}U))",
+                    "  {",
+                    "    return false;",
+                    "  }",
                     f"  canardEncodeScalar(buffer, bit_offset, {tag_bits}U, &tag);",
                     f"  bit_offset += {tag_bits}U;",
                     "  switch (tag)",
@@ -359,52 +400,98 @@ inline T Clamp(T value, T low, T high) noexcept
             chunks.append(self._decode_field(field, is_tail=idx == len(spec.fields) - 1))
         return "\n".join(chunk for chunk in chunks if chunk)
 
+    @staticmethod
+    def _field_tao_expr(is_tail: bool) -> str:
+        return "tao" if is_tail else "false"
+
     def _encode_field(self, field: Field, is_tail: bool) -> str:
         if field.type.category == Type.CATEGORY_VOID:
             void = field.type
             assert isinstance(void, VoidType)
-            return f"bit_offset += {void.bitlen}U;"
+            return "\n".join(
+                [
+                    f"if (!detail::CanWriteBits(buffer_size, bit_offset, {void.bitlen}U))",
+                    "{",
+                    "  return false;",
+                    "}",
+                    f"bit_offset += {void.bitlen}U;",
+                ]
+            )
         if field.type.category == Type.CATEGORY_ARRAY:
             return self._encode_array(field, field.type, is_tail)
-        return self._encode_value(field.type, f"msg.{field.name}")
+        return self._encode_value(field.type, f"msg.{field.name}", self._field_tao_expr(is_tail))
 
     def _decode_field(self, field: Field, is_tail: bool) -> str:
         if field.type.category == Type.CATEGORY_VOID:
             void = field.type
             assert isinstance(void, VoidType)
-            return f"bit_offset += {void.bitlen}U;"
+            return "\n".join(
+                [
+                    f"if (detail::RemainingBits(payload_bit_length, bit_offset) < {void.bitlen}U)",
+                    "{",
+                    "  return false;",
+                    "}",
+                    f"bit_offset += {void.bitlen}U;",
+                ]
+            )
         if field.type.category == Type.CATEGORY_ARRAY:
             return self._decode_array(field, field.type, is_tail)
-        return self._decode_value(field.type, f"out.{field.name}")
+        return self._decode_value(field.type, f"out.{field.name}", self._field_tao_expr(is_tail))
 
     def _encode_array(self, field: Field, array: ArrayType, is_tail: bool) -> str:
         elem_ref = f"msg.{field.name}[i]"
         if array.mode == ArrayType.MODE_DYNAMIC:
             len_bits = _length_bits(array.max_size)
-            write_len = f"!(tao && {str(is_tail).lower()})"
-            return "\n".join(
+            item_tao = "(tao && ((i + 1U) == count))" if is_tail else "false"
+            length_prefixed = "\n".join(
                 [
+                    f"const std::size_t count = std::min<std::size_t>(msg.{field.name}_size, {array.max_size}U);",
+                    f"if (!detail::CanWriteBits(buffer_size, bit_offset, {len_bits}U))",
                     "{",
-                    f"  const std::size_t count = std::min<std::size_t>(msg.{field.name}_size, {array.max_size}U);",
-                    f"  if ({write_len})",
-                    "  {",
-                    f"    std::uint64_t encoded_length = static_cast<std::uint64_t>(count);",
-                    f"    canardEncodeScalar(buffer, bit_offset, {len_bits}U, &encoded_length);",
-                    f"    bit_offset += {len_bits}U;",
-                    "  }",
-                    "  for (std::size_t i = 0U; i < count; ++i)",
-                    "  {",
-                    _indent(self._encode_value(array.value_type, elem_ref), 2),
-                    "  }",
+                    "  return false;",
+                    "}",
+                    "std::uint64_t encoded_length = static_cast<std::uint64_t>(count);",
+                    f"canardEncodeScalar(buffer, bit_offset, {len_bits}U, &encoded_length);",
+                    f"bit_offset += {len_bits}U;",
+                    "for (std::size_t i = 0U; i < count; ++i)",
+                    "{",
+                    _indent(self._encode_value(array.value_type, elem_ref, item_tao), 1),
                     "}",
                 ]
             )
+            if is_tail and array.value_type.get_min_bitlen() >= 8:
+                return "\n".join(
+                    [
+                        "{",
+                        f"  const std::size_t count = std::min<std::size_t>(msg.{field.name}_size, {array.max_size}U);",
+                        "  if (tao)",
+                        "  {",
+                        "    for (std::size_t i = 0U; i < count; ++i)",
+                        "    {",
+                        _indent(self._encode_value(array.value_type, elem_ref, "false"), 3),
+                        "    }",
+                        "  }",
+                        "  else",
+                        "  {",
+                        _indent(length_prefixed.replace(item_tao, "false"), 2),
+                        "  }",
+                        "}",
+                    ]
+                )
+            return "\n".join(
+                [
+                    "{",
+                    _indent(length_prefixed, 1),
+                    "}",
+                ]
+            )
+        item_tao = f"(tao && ((i + 1U) == {array.max_size}U))" if is_tail else "false"
         return "\n".join(
             [
                 "{",
                 f"  for (std::size_t i = 0U; i < {array.max_size}U; ++i)",
                 "  {",
-                _indent(self._encode_value(array.value_type, elem_ref), 2),
+                _indent(self._encode_value(array.value_type, elem_ref, item_tao), 2),
                 "  }",
                 "}",
             ]
@@ -414,53 +501,75 @@ inline T Clamp(T value, T low, T high) noexcept
         elem_ref = f"out.{field.name}[i]"
         if array.mode == ArrayType.MODE_DYNAMIC:
             len_bits = _length_bits(array.max_size)
-            elem_bits = array.value_type.get_max_bitlen()
-            read_len_lines = [
-                f"std::size_t count = 0U;",
-                f"if (tao && {str(is_tail).lower()})",
-                "{",
-                f"  const std::uint32_t remaining_bits = (payload_bit_length > bit_offset) ? (payload_bit_length - bit_offset) : 0U;",
-                f"  count = std::min<std::size_t>({array.max_size}U, remaining_bits / {max(elem_bits, 1)}U);",
-                "}",
-                "else",
-                "{",
-                "  std::uint64_t encoded_length = 0U;",
-                f"  if (!detail::DecodeScalar(transfer, bit_offset, {len_bits}U, false, &encoded_length))",
-                "  {",
-                "    return false;",
-                "  }",
-                f"  bit_offset += {len_bits}U;",
-                f"  if (encoded_length > {array.max_size}U)",
-                "  {",
-                "    return false;",
-                "  }",
-                "  count = static_cast<std::size_t>(encoded_length);",
-                "}",
-                f"out.{field.name}_size = count;",
-            ]
-            return "\n".join(
+            item_tao = "(tao && ((i + 1U) == count))" if is_tail else "false"
+            length_prefixed = "\n".join(
                 [
+                    "std::size_t count = 0U;",
+                    "std::uint64_t encoded_length = 0U;",
+                    f"if (!detail::DecodeScalar(transfer, bit_offset, {len_bits}U, false, &encoded_length))",
                     "{",
-                    _indent("\n".join(read_len_lines), 1),
-                    "  for (std::size_t i = 0U; i < count; ++i)",
-                    "  {",
-                    _indent(self._decode_value(array.value_type, elem_ref), 2),
-                    "  }",
+                    "  return false;",
+                    "}",
+                    f"bit_offset += {len_bits}U;",
+                    f"if (encoded_length > {array.max_size}U)",
+                    "{",
+                    "  return false;",
+                    "}",
+                    "count = static_cast<std::size_t>(encoded_length);",
+                    f"out.{field.name}_size = count;",
+                    "for (std::size_t i = 0U; i < count; ++i)",
+                    "{",
+                    _indent(self._decode_value(array.value_type, elem_ref, item_tao), 1),
                     "}",
                 ]
             )
+            if is_tail and array.value_type.get_min_bitlen() >= 8:
+                min_bits = array.value_type.get_min_bitlen()
+                return "\n".join(
+                    [
+                        "{",
+                        "  if (tao)",
+                        "  {",
+                        "    std::size_t count = 0U;",
+                        f"    while ((count < {array.max_size}U) && (detail::RemainingBits(payload_bit_length, bit_offset) >= {min_bits}U))",
+                        "    {",
+                        "      const std::size_t i = count;",
+                        _indent(self._decode_value(array.value_type, elem_ref, "false"), 3),
+                        "      ++count;",
+                        "    }",
+                        "    if (detail::RemainingBits(payload_bit_length, bit_offset) >= 8U)",
+                        "    {",
+                        "      return false;",
+                        "    }",
+                        f"    out.{field.name}_size = count;",
+                        "  }",
+                        "  else",
+                        "  {",
+                        _indent(length_prefixed.replace(item_tao, "false"), 2),
+                        "  }",
+                        "}",
+                    ]
+                )
+            return "\n".join(
+                [
+                    "{",
+                    _indent(length_prefixed, 1),
+                    "}",
+                ]
+            )
+        item_tao = f"(tao && ((i + 1U) == {array.max_size}U))" if is_tail else "false"
         return "\n".join(
             [
                 "{",
                 f"  for (std::size_t i = 0U; i < {array.max_size}U; ++i)",
                 "  {",
-                _indent(self._decode_value(array.value_type, elem_ref), 2),
+                _indent(self._decode_value(array.value_type, elem_ref, item_tao), 2),
                 "  }",
                 "}",
             ]
         )
 
-    def _encode_value(self, type_obj: Type, expr: str) -> str:
+    def _encode_value(self, type_obj: Type, expr: str, tao_expr: str) -> str:
         if type_obj.category == Type.CATEGORY_PRIMITIVE:
             primitive = type_obj
             assert isinstance(primitive, PrimitiveType)
@@ -468,10 +577,10 @@ inline T Clamp(T value, T low, T high) noexcept
         if type_obj.category == Type.CATEGORY_COMPOUND:
             compound = type_obj
             assert isinstance(compound, CompoundType)
-            return f"if (!{self.qualified_struct(compound)}::EncodeTo({expr}, buffer, buffer_size, bit_offset, tao))\n{{\n  return false;\n}}"
+            return f"if (!{self.qualified_struct(compound)}::EncodeTo({expr}, buffer, buffer_size, bit_offset, {tao_expr}))\n{{\n  return false;\n}}"
         raise TypeError(f"Unsupported value type: {type_obj}")
 
-    def _decode_value(self, type_obj: Type, expr: str) -> str:
+    def _decode_value(self, type_obj: Type, expr: str, tao_expr: str) -> str:
         if type_obj.category == Type.CATEGORY_PRIMITIVE:
             primitive = type_obj
             assert isinstance(primitive, PrimitiveType)
@@ -479,7 +588,7 @@ inline T Clamp(T value, T low, T high) noexcept
         if type_obj.category == Type.CATEGORY_COMPOUND:
             compound = type_obj
             assert isinstance(compound, CompoundType)
-            return f"if (!{self.qualified_struct(compound)}::DecodeFrom(transfer, bit_offset, {expr}, tao))\n{{\n  return false;\n}}"
+            return f"if (!{self.qualified_struct(compound)}::DecodeFrom(transfer, bit_offset, {expr}, {tao_expr}))\n{{\n  return false;\n}}"
         raise TypeError(f"Unsupported value type: {type_obj}")
 
     def _encode_primitive(self, primitive: PrimitiveType, expr: str) -> str:
@@ -488,6 +597,10 @@ inline T Clamp(T value, T low, T high) noexcept
                 [
                     "{",
                     f"  const bool value = ({expr} != false);",
+                    "  if (!detail::CanWriteBits(buffer_size, bit_offset, 1U))",
+                    "  {",
+                    "    return false;",
+                    "  }",
                     "  canardEncodeScalar(buffer, bit_offset, 1U, &value);",
                     "  bit_offset += 1U;",
                     "}",
@@ -499,6 +612,10 @@ inline T Clamp(T value, T low, T high) noexcept
                     [
                         "{",
                         f"  const std::uint16_t value = canardConvertNativeFloatToFloat16(static_cast<float>({expr}));",
+                        "  if (!detail::CanWriteBits(buffer_size, bit_offset, 16U))",
+                        "  {",
+                        "    return false;",
+                        "  }",
                         "  canardEncodeScalar(buffer, bit_offset, 16U, &value);",
                         "  bit_offset += 16U;",
                         "}",
@@ -511,6 +628,10 @@ inline T Clamp(T value, T low, T high) noexcept
                         "  std::uint32_t value = 0U;",
                         f"  const float native = static_cast<float>({expr});",
                         "  std::memcpy(&value, &native, sizeof(value));",
+                        "  if (!detail::CanWriteBits(buffer_size, bit_offset, 32U))",
+                        "  {",
+                        "    return false;",
+                        "  }",
                         "  canardEncodeScalar(buffer, bit_offset, 32U, &value);",
                         "  bit_offset += 32U;",
                         "}",
@@ -522,6 +643,10 @@ inline T Clamp(T value, T low, T high) noexcept
                     "  std::uint64_t value = 0U;",
                     f"  const double native = static_cast<double>({expr});",
                     "  std::memcpy(&value, &native, sizeof(value));",
+                    "  if (!detail::CanWriteBits(buffer_size, bit_offset, 64U))",
+                    "  {",
+                    "    return false;",
+                    "  }",
                     "  canardEncodeScalar(buffer, bit_offset, 64U, &value);",
                     "  bit_offset += 64U;",
                     "}",
@@ -539,12 +664,16 @@ inline T Clamp(T value, T low, T high) noexcept
         else:
             assign = f"const {cpp_type} value = static_cast<{cpp_type}>({expr});"
         return "\n".join(
-            [
-                "{",
-                f"  {assign}",
-                f"  canardEncodeScalar(buffer, bit_offset, {primitive.bitlen}U, &value);",
-                f"  bit_offset += {primitive.bitlen}U;",
-                "}",
+                [
+                    "{",
+                    f"  {assign}",
+                    f"  if (!detail::CanWriteBits(buffer_size, bit_offset, {primitive.bitlen}U))",
+                    "  {",
+                    "    return false;",
+                    "  }",
+                    f"  canardEncodeScalar(buffer, bit_offset, {primitive.bitlen}U, &value);",
+                    f"  bit_offset += {primitive.bitlen}U;",
+                    "}",
             ]
         )
 
