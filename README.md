@@ -6,10 +6,9 @@ The compiler reads DroneCAN/UAVCAN v0 `.uavcan` DSDL definitions and emits an
 XRobot module repository layout:
 
 - `module.yaml`
-- root compatibility header
+- root header-only `{module_name}.hpp`
 - `CMakeLists.txt`
-- generated C++ DSDL codecs
-- an `Application` wrapper that owns a `DroneCANCoreSupport::DroneCANNode`
+- generated C++ DSDL codecs and an `Application` wrapper in the root header
 
 The generated C++ module depends on the existing `dronecan_core` module for the
 LibXR CAN bridge and libcanard runtime.

@@ -50,19 +50,13 @@ class ModuleRenderer:
 
     def write(self) -> None:
         out = self.cfg.output
-        include_dir = out / "include" / self.cfg.module_name
-        src_dir = out / "src"
-        include_dir.mkdir(parents=True, exist_ok=True)
-        src_dir.mkdir(parents=True, exist_ok=True)
+        out.mkdir(parents=True, exist_ok=True)
 
         self._write(out / "module.yaml", self.render_module_yaml())
         self._write(out / "CMakeLists.txt", self.render_cmake())
         self._write(out / "info.cmake", self.render_info_cmake())
         self._write(out / "README.md", self.render_readme())
-        self._write(out / f"{self.cfg.class_name}.hpp", self.render_class_header())
-        self._write(out / f"{self.cfg.module_name}.hpp", self.render_compat_header())
-        self._write(include_dir / f"{self.cfg.module_name}_types.hpp", render_types_header(self.cfg.root_namespace, self.types))
-        self._write(src_dir / f"{self.cfg.class_name}.cpp", self.render_class_source())
+        self._write(out / f"{self.cfg.module_name}.hpp", self.render_module_header())
 
     @staticmethod
     def _write(path: Path, text: str) -> None:
@@ -111,7 +105,7 @@ class ModuleRenderer:
         data = {
             "name": self.cfg.module_name,
             "class_name": self.cfg.class_name,
-            "header": f"{self.cfg.class_name}.hpp",
+            "header": f"{self.cfg.module_name}.hpp",
             "constructor_args": {
                 "node_id": self.cfg.default_node_id,
                 "can_alias": "can0",
@@ -123,24 +117,37 @@ class ModuleRenderer:
         return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
     def render_cmake(self) -> str:
-        return f"""target_sources(xr PRIVATE
-  ${{CMAKE_CURRENT_LIST_DIR}}/src/{self.cfg.class_name}.cpp
-)
-
-target_include_directories(xr PUBLIC
-  ${{CMAKE_CURRENT_LIST_DIR}}
-  ${{CMAKE_CURRENT_LIST_DIR}}/include
+        return """target_include_directories(xr PUBLIC
+  ${CMAKE_CURRENT_LIST_DIR}
 )
 """
 
     def render_info_cmake(self) -> str:
         return f"# Generated DroneCAN DSDL XRobot module: {self.cfg.module_name}\n"
 
-    def render_compat_header(self) -> str:
+    def render_module_header(self) -> str:
         pascal_alias = to_pascal(self.cfg.module_name)
+        types_header = render_types_header(self.cfg.root_namespace, self.types).removeprefix("#pragma once\n\n")
         return f"""#pragma once
 
-#include "{self.cfg.class_name}.hpp"
+/* === MODULE MANIFEST V2 ===
+name: {self.cfg.module_name}
+class_name: {self.cfg.class_name}
+header: {self.cfg.module_name}.hpp
+constructor_args:
+  node_id: {self.cfg.default_node_id}
+  can_alias: can0
+  timebase_alias: timebase
+  node_name: {self.cfg.node_name}
+  node_status_period_ms: {self.cfg.default_node_status_period_ms}
+root_namespace: {self.cfg.root_namespace}
+=== END MANIFEST === */
+
+{types_header}
+
+{self.render_class_header()}
+
+{self.render_class_source()}
 
 using {self.cfg.module_name} = {self.cfg.class_name};
 using {pascal_alias} = {self.cfg.class_name};
@@ -211,10 +218,9 @@ callbacks for received transfers.
                 ]
             )
 
-        return f"""#pragma once
-
-#include <array>
+        return f"""#include <array>
 #include <cstdint>
+#include <cstring>
 
 extern "C"
 {{
@@ -227,7 +233,6 @@ extern "C"
 #include "dronecan_core/dronecan_types.hpp"
 #include "libxr.hpp"
 #include "timebase.hpp"
-#include "{self.cfg.module_name}/{self.cfg.module_name}_types.hpp"
 
 class {self.cfg.class_name} final : public LibXR::Application
 {{
@@ -274,11 +279,7 @@ class {self.cfg.class_name} final : public LibXR::Application
         send_impls = "\n\n".join(self._render_send_impl(spec) for spec in self.transfers)
         setter_impls = "\n\n".join(self._render_setter_impl(spec) for spec in self.transfers)
 
-        return f"""#include "{self.cfg.class_name}.hpp"
-
-#include <cstring>
-
-{self.cfg.class_name}::{self.cfg.class_name}(LibXR::HardwareContainer& hw,
+        return f"""inline {self.cfg.class_name}::{self.cfg.class_name}(LibXR::HardwareContainer& hw,
                                              LibXR::ApplicationManager& appmgr,
                                              std::uint8_t node_id,
                                              const char* can_alias,
@@ -296,39 +297,39 @@ class {self.cfg.class_name} final : public LibXR::Application
   appmgr.Register(*this);
 }}
 
-void {self.cfg.class_name}::OnMonitor()
+inline void {self.cfg.class_name}::OnMonitor()
 {{
   node_.Poll();
 }}
 
-DroneCANCoreSupport::DroneCANNode& {self.cfg.class_name}::Node() noexcept
+inline DroneCANCoreSupport::DroneCANNode& {self.cfg.class_name}::Node() noexcept
 {{
   return node_;
 }}
 
-const DroneCANCoreSupport::DroneCANNode& {self.cfg.class_name}::Node() const noexcept
+inline const DroneCANCoreSupport::DroneCANNode& {self.cfg.class_name}::Node() const noexcept
 {{
   return node_;
 }}
 
-const char* {self.cfg.class_name}::NormalizeCString(const char* value, const char* fallback) noexcept
+inline const char* {self.cfg.class_name}::NormalizeCString(const char* value, const char* fallback) noexcept
 {{
   return (value != nullptr && value[0] != '\\0') ? value : fallback;
 }}
 
-std::uint32_t {self.cfg.class_name}::NormalizePeriodMs(std::uint32_t period_ms) noexcept
+inline std::uint32_t {self.cfg.class_name}::NormalizePeriodMs(std::uint32_t period_ms) noexcept
 {{
   return period_ms == 0U ? 1U : period_ms;
 }}
 
-LibXR::DroneCAN::Config {self.cfg.class_name}::MakeNodeConfig(std::uint32_t node_status_period_ms) noexcept
+inline LibXR::DroneCAN::Config {self.cfg.class_name}::MakeNodeConfig(std::uint32_t node_status_period_ms) noexcept
 {{
   LibXR::DroneCAN::Config config{{}};
   config.node_status_period_us = static_cast<std::uint64_t>(NormalizePeriodMs(node_status_period_ms)) * 1000ULL;
   return config;
 }}
 
-LibXR::DroneCAN::NodeInfo {self.cfg.class_name}::MakeNodeInfo(const char* node_name)
+inline LibXR::DroneCAN::NodeInfo {self.cfg.class_name}::MakeNodeInfo(const char* node_name)
 {{
   LibXR::DroneCAN::NodeInfo info{{}};
   const char* normalized = NormalizeCString(node_name, "{self.cfg.node_name}");
@@ -345,7 +346,7 @@ LibXR::DroneCAN::NodeInfo {self.cfg.class_name}::MakeNodeInfo(const char* node_n
 """
 
     def _render_setter_impl(self, spec: TransferSpec) -> str:
-        return f"""void {self.cfg.class_name}::Set{spec.alias}Callback(void* context, {spec.callback_type} callback) noexcept
+        return f"""inline void {self.cfg.class_name}::Set{spec.alias}Callback(void* context, {spec.callback_type} callback) noexcept
 {{
   {spec.callback_context_member} = context;
   {spec.callback_member} = callback;
@@ -354,13 +355,13 @@ LibXR::DroneCAN::NodeInfo {self.cfg.class_name}::MakeNodeInfo(const char* node_n
     def _render_send_impl(self, spec: TransferSpec) -> str:
         if spec.transfer_kind == "Message":
             call = f"node_.Broadcast({spec.cpp_type}::kDataTypeId, {spec.cpp_type}::kDataTypeSignature, priority, LibXR::ConstRawData(payload.data(), payload_size))"
-            signature = f"LibXR::ErrorCode {self.cfg.class_name}::{spec.send_method}(const {spec.cpp_type}& message, std::uint8_t priority)"
+            signature = f"inline LibXR::ErrorCode {self.cfg.class_name}::{spec.send_method}(const {spec.cpp_type}& message, std::uint8_t priority)"
         elif spec.transfer_kind == "Request":
             call = f"node_.Request(destination_node_id, {spec.cpp_type}::kDataTypeId, {spec.cpp_type}::kDataTypeSignature, priority, LibXR::ConstRawData(payload.data(), payload_size))"
-            signature = f"LibXR::ErrorCode {self.cfg.class_name}::{spec.send_method}(std::uint8_t destination_node_id, const {spec.cpp_type}& message, std::uint8_t priority)"
+            signature = f"inline LibXR::ErrorCode {self.cfg.class_name}::{spec.send_method}(std::uint8_t destination_node_id, const {spec.cpp_type}& message, std::uint8_t priority)"
         else:
             call = f"node_.Respond(destination_node_id, {spec.cpp_type}::kDataTypeId, {spec.cpp_type}::kDataTypeSignature, transfer_id, priority, LibXR::ConstRawData(payload.data(), payload_size))"
-            signature = f"LibXR::ErrorCode {self.cfg.class_name}::{spec.send_method}(std::uint8_t destination_node_id, std::uint8_t transfer_id, const {spec.cpp_type}& message, std::uint8_t priority)"
+            signature = f"inline LibXR::ErrorCode {self.cfg.class_name}::{spec.send_method}(std::uint8_t destination_node_id, std::uint8_t transfer_id, const {spec.cpp_type}& message, std::uint8_t priority)"
 
         return f"""{signature}
 {{
@@ -370,7 +371,7 @@ LibXR::DroneCAN::NodeInfo {self.cfg.class_name}::MakeNodeInfo(const char* node_n
 }}"""
 
     def _render_transfer_impl(self, spec: TransferSpec) -> str:
-        return f"""void {self.cfg.class_name}::{spec.static_handler}(bool, {self.cfg.class_name}* self, const LibXR::DroneCAN::TransferMetadata& meta, LibXR::ConstRawData payload)
+        return f"""inline void {self.cfg.class_name}::{spec.static_handler}(bool, {self.cfg.class_name}* self, const LibXR::DroneCAN::TransferMetadata& meta, LibXR::ConstRawData payload)
 {{
   if (self != nullptr)
   {{
@@ -378,7 +379,7 @@ LibXR::DroneCAN::NodeInfo {self.cfg.class_name}::MakeNodeInfo(const char* node_n
   }}
 }}
 
-void {self.cfg.class_name}::{spec.instance_handler}(const LibXR::DroneCAN::TransferMetadata& meta, LibXR::ConstRawData payload) noexcept
+inline void {self.cfg.class_name}::{spec.instance_handler}(const LibXR::DroneCAN::TransferMetadata& meta, LibXR::ConstRawData payload) noexcept
 {{
   CanardRxTransfer transfer{{}};
   transfer.payload_len = static_cast<std::uint16_t>(payload.size_);

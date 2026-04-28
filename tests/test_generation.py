@@ -32,17 +32,34 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     out = cfg.output
     assert (out / "module.yaml").exists()
     assert (out / "CMakeLists.txt").exists()
-    assert (out / "DroneCANEscGenerated.hpp").exists()
-    assert (out / "src" / "DroneCANEscGenerated.cpp").exists()
-    assert (out / "include" / "dronecan_esc_generated" / "dronecan_esc_generated_types.hpp").exists()
+    assert (out / "dronecan_esc_generated.hpp").exists()
+    assert sorted(path.name for path in out.glob("*.hpp")) == ["dronecan_esc_generated.hpp"]
+    assert not list(out.rglob("*.cpp"))
+    assert not (out / "DroneCANEscGenerated.hpp").exists()
+    assert not (out / "include" / "dronecan_esc_generated" / "dronecan_esc_generated_types.hpp").exists()
 
     module_yaml = (out / "module.yaml").read_text(encoding="utf-8")
     assert "name: dronecan_esc_generated" in module_yaml
     assert "class_name: DroneCANEscGenerated" in module_yaml
+    assert "header: dronecan_esc_generated.hpp" in module_yaml
 
-    types_hpp = (out / "include" / "dronecan_esc_generated" / "dronecan_esc_generated_types.hpp").read_text(
-        encoding="utf-8"
-    )
-    assert "kDataTypeId = 1030U" in types_hpp
-    assert "0x217F5C87D7EC951DULL" in types_hpp
-    assert "std::array<std::int16_t, 20U> cmd" in types_hpp
+    cmake = (out / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "target_include_directories(xr PUBLIC" in cmake
+    assert "${CMAKE_CURRENT_LIST_DIR}" in cmake
+    assert "target_sources" not in cmake
+    assert "/include" not in cmake
+    assert ".cpp" not in cmake
+
+    module_hpp = (out / "dronecan_esc_generated.hpp").read_text(encoding="utf-8")
+    assert "/* === MODULE MANIFEST V2 ===" in module_hpp
+    assert "header: dronecan_esc_generated.hpp" in module_hpp
+    assert "constructor_args:" in module_hpp
+    assert "node_id: 10" in module_hpp
+    assert "can_alias: can0" in module_hpp
+    assert "=== END MANIFEST === */" in module_hpp
+    assert "using dronecan_esc_generated = DroneCANEscGenerated;" in module_hpp
+    assert "inline DroneCANEscGenerated::DroneCANEscGenerated(" in module_hpp
+    assert "inline void DroneCANEscGenerated::OnMonitor()" in module_hpp
+    assert "kDataTypeId = 1030U" in module_hpp
+    assert "0x217F5C87D7EC951DULL" in module_hpp
+    assert "std::array<std::int16_t, 20U> cmd" in module_hpp
