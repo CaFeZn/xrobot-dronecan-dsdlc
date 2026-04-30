@@ -170,13 +170,7 @@ class ModuleRenderer:
                 "node_name": self.cfg.node_name,
                 "node_status_period_ms": self.cfg.default_node_status_period_ms,
             },
-            "dsdl": [
-                {
-                    "type": item.full_name,
-                    "header": self.type_header_names[item.full_name],
-                }
-                for item in self.types
-            ],
+            "dsdl": [{"type": item.full_name} for item in self.types],
         }
         return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 

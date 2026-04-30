@@ -58,7 +58,7 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "class_name: DroneCANEscGenerated" in module_yaml
     assert "header: dronecan_esc_generated.hpp" in module_yaml
     assert "type: uavcan.equipment.esc.RawCommand" in module_yaml
-    assert "header: uavcan_equipment_esc_raw_command.hpp" in module_yaml
+    assert "uavcan_equipment_esc_raw_command.hpp" not in module_yaml
 
     cmake = (out / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "target_include_directories(xr PUBLIC" in cmake
