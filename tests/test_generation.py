@@ -75,7 +75,7 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "template_args: []" in module_hpp
     assert "required_hardware: can0 timebase" in module_hpp
     assert "depends:" in module_hpp
-    assert "- dronecan_core" in module_hpp
+    assert "- CaFeZn/dronecan_core" in module_hpp
     assert "=== END MANIFEST === */" in module_hpp
     assert "using dronecan_esc_generated = DroneCANEscGenerated;" in module_hpp
     assert "inline DroneCANEscGenerated::DroneCANEscGenerated(" not in module_hpp
@@ -178,6 +178,15 @@ def test_generation_rejects_unsafe_xrobot_configuration(tmp_path: Path):
             class_name="DroneCANBad",
             root_namespace="DroneCANBadTypes",
             node_name='org.libxr."bad"',
+        )
+
+    with pytest.raises(ValueError, match="core_module_id"):
+        GenerationConfig(
+            output=tmp_path / "dronecan_bad",
+            module_name="dronecan_bad",
+            class_name="DroneCANBad",
+            root_namespace="DroneCANBadTypes",
+            core_module_id="dronecan_core",
         )
 
 

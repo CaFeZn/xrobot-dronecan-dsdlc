@@ -37,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--node-name", default="org.libxr.dronecan.generated", help="默认 DroneCAN 节点名 / Default DroneCAN node name")
     gen.add_argument("--node-id", default=10, type=int, help="生成 module.yaml 中的默认节点 ID / Default node ID in generated module.yaml")
     gen.add_argument("--node-status-period-ms", default=1000, type=int, help="默认 NodeStatus 周期 / Default NodeStatus period")
+    gen.add_argument("--core-module-id", default="CaFeZn/dronecan_core", help="dronecan_core 的完整 XRobot 模块 ID / Full XRobot module ID for dronecan_core")
     return parser
 
 
@@ -54,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
             node_name=args.node_name,
             default_node_id=args.node_id,
             default_node_status_period_ms=args.node_status_period_ms,
+            core_module_id=args.core_module_id,
         )
         generate_module(cfg, selected)
         print(f"[OK] 已生成 {cfg.module_name}: {cfg.output} / Generated {cfg.module_name} at {cfg.output}")

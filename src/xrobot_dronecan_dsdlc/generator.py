@@ -44,6 +44,7 @@ class GenerationConfig:
     node_name: str = "org.libxr.dronecan.generated"
     default_node_id: int = 10
     default_node_status_period_ms: int = 1000
+    core_module_id: str = "CaFeZn/dronecan_core"
 
     def __post_init__(self) -> None:
         if not is_cpp_identifier(self.module_name):
@@ -70,6 +71,8 @@ class GenerationConfig:
             raise ValueError("node_name may only contain ASCII letters, digits, underscore, dot, and dash")
         if len(self.node_name.encode("utf-8")) > _MAX_NODE_NAME_BYTES:
             raise ValueError(f"node_name must be at most {_MAX_NODE_NAME_BYTES} UTF-8 bytes")
+        if not self.core_module_id or "/" not in self.core_module_id:
+            raise ValueError("core_module_id must be a full XRobot module ID such as 'CaFeZn/dronecan_core'")
 
 
 @dataclass(frozen=True)
@@ -230,7 +233,7 @@ class ModuleRenderer:
             ],
             "template_args": [],
             "required_hardware": "can0 timebase",
-            "depends": ["dronecan_core"],
+            "depends": [self.cfg.core_module_id],
         }
         manifest = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).rstrip()
         return f"/* === MODULE MANIFEST V2 ===\n{manifest}\n=== END MANIFEST === */"
@@ -320,7 +323,8 @@ xr_dronecan_dsdlc generate `
   --module-name {self.cfg.module_name} `
   --class-name {self.cfg.class_name} `
   --root-namespace {self.cfg.root_namespace} `
-  --output D:/Codes/Modules/{self.cfg.module_name}
+  --core-module-id {self.cfg.core_module_id} `
+  --output D:/Codes/DroneCAN/{self.cfg.module_name}
 ```
 
 For custom DSDL, pass the root namespace directory to `generate`. The directory

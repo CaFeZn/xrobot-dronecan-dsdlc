@@ -28,6 +28,12 @@ LibXR CAN bridge and libcanard runtime.
 Generate a module for ESC RawCommand, Status, and DynamicNodeId Allocation from
 the bundled DroneCAN specs:
 
+推荐把输出目录指向独立的 XRobot 模块仓库，例如 `dronecan_dsdl` 的本地克隆；消费工程再通过 `modules.yaml` / `sources.yaml` 同步该仓库。
+
+Prefer writing the output to a standalone XRobot module repository, such as a
+local clone of `dronecan_dsdl`; consuming projects should then synchronize that
+repository through `modules.yaml` / `sources.yaml`.
+
 ```powershell
 python -m pip install -e .
 xr_dronecan_dsdlc generate `
@@ -38,7 +44,8 @@ xr_dronecan_dsdlc generate `
   --module-name dronecan_dsdl `
   --class-name DroneCANDsdl `
   --root-namespace DroneCANGeneratedDsdl `
-  --output D:\Codes\Modules\dronecan_dsdl
+  --core-module-id CaFeZn/dronecan_core `
+  --output D:\Codes\DroneCAN\dronecan_dsdl
 ```
 
 生成的 `module.yaml` 中，`dsdl` 列表只需要记录 DSDL 类型名，不需要手写
@@ -68,6 +75,15 @@ uavcan_protocol_dynamic_node_id_allocation.hpp
 
 Instantiate the generated facade in `User/xrobot.yaml`. `dronecan_core` is added
 as a dependency by the build and does not need a separate entry here.
+
+如果该模块通过 `xrobot_init_mod` 作为独立模块仓库同步，manifest 中的
+`depends` 必须使用完整模块 ID。默认依赖是 `CaFeZn/dronecan_core`，可用
+`--core-module-id` 改成你的私有 namespace。
+
+When this module is synchronized as a standalone module repository through
+`xrobot_init_mod`, the manifest `depends` entry must use a full module ID. The
+default dependency is `CaFeZn/dronecan_core`; use `--core-module-id` for a
+private namespace.
 
 ```yaml
 modules:
@@ -110,7 +126,8 @@ xr_dronecan_dsdlc generate `
   --module-name dronecan_custom `
   --class-name DroneCANCustom `
   --root-namespace DroneCANCustomDsdl `
-  --output D:\Codes\Modules\dronecan_custom
+  --core-module-id CaFeZn/dronecan_core `
+  --output D:\Codes\DroneCAN\dronecan_custom
 ```
 
 ## 说明 / Notes
