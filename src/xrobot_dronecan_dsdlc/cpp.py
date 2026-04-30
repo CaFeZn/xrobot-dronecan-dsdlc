@@ -61,28 +61,45 @@ class CppTypeRenderer:
 
     def render(self) -> str:
         parts = [
-            "#pragma once",
-            "",
-            "#include <algorithm>",
-            "#include <array>",
-            "#include <cstddef>",
-            "#include <cstdint>",
-            "#include <cstring>",
-            "",
-            'extern "C"',
-            "{",
-            '#include "canard.h"',
-            "}",
-            "",
-            f"namespace {self.root_namespace}",
-            "{",
-            self._render_detail_helpers(),
-            "}",
-            "",
+            self.render_detail_header().removeprefix("#pragma once\n\n"),
         ]
         for compound in self.types:
             parts.append(self._render_compound(compound))
             parts.append("")
+        return "\n".join(parts).rstrip() + "\n"
+
+    def render_detail_header(self) -> str:
+        return "\n".join(
+            [
+                "#pragma once",
+                "",
+                "#include <algorithm>",
+                "#include <array>",
+                "#include <cstddef>",
+                "#include <cstdint>",
+                "#include <cstring>",
+                "",
+                'extern "C"',
+                "{",
+                '#include "canard.h"',
+                "}",
+                "",
+                f"namespace {self.root_namespace}",
+                "{",
+                self._render_detail_helpers(),
+                "}",
+            ]
+        ).rstrip() + "\n"
+
+    def render_compound_header(self, compound: CompoundType, includes: Iterable[str] = ()) -> str:
+        include_lines = [f'#include "{include}"' for include in includes]
+        parts = [
+            "#pragma once",
+            "",
+            *include_lines,
+            "",
+            self._render_compound(compound),
+        ]
         return "\n".join(parts).rstrip() + "\n"
 
     def qualified_struct(self, compound: CompoundType, part: str | None = None) -> str:
@@ -304,6 +321,7 @@ inline T Clamp(T value, T low, T high) noexcept
             "  {",
             "    return false;",
             "  }",
+            "  (void)tao;",
         ]
         lines.extend(_indent(self._render_encode_fields(spec), 1).splitlines())
         lines.append("  return true;")
@@ -314,6 +332,7 @@ inline T Clamp(T value, T low, T high) noexcept
                 f"inline bool {spec.name}::DecodeFrom(const CanardRxTransfer& transfer, std::uint32_t& bit_offset, {spec.name}& out, bool tao) noexcept",
                 "{",
                 "  const std::uint32_t payload_bit_length = detail::PayloadBitLength(transfer);",
+                "  (void)tao;",
             ]
         )
         lines.extend(_indent(self._render_decode_fields(spec), 1).splitlines())
@@ -793,4 +812,3 @@ inline T Clamp(T value, T low, T high) noexcept
 
 def render_types_header(root_namespace: str, types: Iterable[CompoundType]) -> str:
     return CppTypeRenderer(root_namespace, types).render()
-

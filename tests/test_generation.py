@@ -42,7 +42,12 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert (out / "module.yaml").exists()
     assert (out / "CMakeLists.txt").exists()
     assert (out / "dronecan_esc_generated.hpp").exists()
-    assert sorted(path.name for path in out.glob("*.hpp")) == ["dronecan_esc_generated.hpp"]
+    assert sorted(path.name for path in out.glob("*.hpp")) == [
+        "dronecan_esc_generated.hpp",
+        "dronecan_esc_generated_dsdl_detail.hpp",
+        "uavcan_equipment_esc_raw_command.hpp",
+        "uavcan_equipment_esc_status.hpp",
+    ]
     assert not list(out.rglob("*.cpp"))
     assert not (out / "DroneCANEscGenerated.hpp").exists()
     assert not (out / "include" / "dronecan_esc_generated" / "dronecan_esc_generated_types.hpp").exists()
@@ -52,6 +57,8 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "name: dronecan_esc_generated" in module_yaml
     assert "class_name: DroneCANEscGenerated" in module_yaml
     assert "header: dronecan_esc_generated.hpp" in module_yaml
+    assert "type: uavcan.equipment.esc.RawCommand" in module_yaml
+    assert "header: uavcan_equipment_esc_raw_command.hpp" in module_yaml
 
     cmake = (out / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "target_include_directories(xr PUBLIC" in cmake
@@ -74,9 +81,15 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "inline DroneCANEscGenerated::DroneCANEscGenerated(" not in module_hpp
     assert "DroneCANEscGenerated(LibXR::HardwareContainer& hw," in module_hpp
     assert "void OnMonitor() override" in module_hpp
-    assert "kDataTypeId = 1030U" in module_hpp
-    assert "0x217F5C87D7EC951DULL" in module_hpp
-    assert "std::array<std::int16_t, 20U> cmd" in module_hpp
+    assert '#include "uavcan_equipment_esc_raw_command.hpp"' in module_hpp
+    assert '#include "uavcan_equipment_esc_status.hpp"' in module_hpp
+    assert "struct RawCommand" not in module_hpp
+
+    raw_command_hpp = (out / "uavcan_equipment_esc_raw_command.hpp").read_text(encoding="utf-8")
+    assert '#include "dronecan_esc_generated_dsdl_detail.hpp"' in raw_command_hpp
+    assert "kDataTypeId = 1030U" in raw_command_hpp
+    assert "0x217F5C87D7EC951DULL" in raw_command_hpp
+    assert "std::array<std::int16_t, 20U> cmd" in raw_command_hpp
 
 
 def test_generation_rejects_invalid_cpp_names(tmp_path: Path):
@@ -220,13 +233,16 @@ def test_nested_compound_tao_and_bounds_generation(tmp_path: Path):
     )
 
     generate_module(cfg, selected)
-    module_hpp = (cfg.output / "dronecan_get_node_info.hpp").read_text(encoding="utf-8")
+    detail_hpp = (cfg.output / "dronecan_get_node_info_dsdl_detail.hpp").read_text(encoding="utf-8")
+    get_node_info_hpp = (cfg.output / "uavcan_protocol_get_node_info.hpp").read_text(encoding="utf-8")
 
-    assert "CanWriteBits(std::size_t buffer_size" in module_hpp
-    assert "HardwareVersion::EncodeTo(msg.hardware_version, buffer, buffer_size, bit_offset, false)" in module_hpp
-    assert "HardwareVersion::DecodeFrom(transfer, bit_offset, out.hardware_version, false)" in module_hpp
-    assert "SoftwareVersion::EncodeTo(msg.software_version, buffer, buffer_size, bit_offset, false)" in module_hpp
-    assert "if (!detail::CanWriteBits(buffer_size, bit_offset" in module_hpp
+    assert "CanWriteBits(std::size_t buffer_size" in detail_hpp
+    assert '#include "uavcan_protocol_hardware_version.hpp"' in get_node_info_hpp
+    assert '#include "uavcan_protocol_software_version.hpp"' in get_node_info_hpp
+    assert "HardwareVersion::EncodeTo(msg.hardware_version, buffer, buffer_size, bit_offset, false)" in get_node_info_hpp
+    assert "HardwareVersion::DecodeFrom(transfer, bit_offset, out.hardware_version, false)" in get_node_info_hpp
+    assert "SoftwareVersion::EncodeTo(msg.software_version, buffer, buffer_size, bit_offset, false)" in get_node_info_hpp
+    assert "if (!detail::CanWriteBits(buffer_size, bit_offset" in get_node_info_hpp
 
 
 def test_union_tag_and_service_tao_generation(tmp_path: Path):
@@ -240,11 +256,13 @@ def test_union_tag_and_service_tao_generation(tmp_path: Path):
     )
 
     generate_module(cfg, selected)
-    module_hpp = (cfg.output / "dronecan_param_getset.hpp").read_text(encoding="utf-8")
+    getset_hpp = (cfg.output / "uavcan_protocol_param_get_set.hpp").read_text(encoding="utf-8")
+    value_hpp = (cfg.output / "uavcan_protocol_param_value.hpp").read_text(encoding="utf-8")
 
-    assert "if (msg.union_tag >" in module_hpp
-    assert "Value::EncodeTo(msg.value, buffer, buffer_size, bit_offset, false)" in module_hpp
-    assert "Value::DecodeFrom(transfer, bit_offset, out.value, false)" in module_hpp
+    assert "if (msg.union_tag >" in value_hpp
+    assert '#include "uavcan_protocol_param_value.hpp"' in getset_hpp
+    assert "Value::EncodeTo(msg.value, buffer, buffer_size, bit_offset, false)" in getset_hpp
+    assert "Value::DecodeFrom(transfer, bit_offset, out.value, false)" in getset_hpp
 
 
 def test_generation_rejects_dsdl_cpp_identifier_conflicts(tmp_path: Path):

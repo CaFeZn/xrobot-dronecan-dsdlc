@@ -12,7 +12,8 @@ from typing import Iterable
 import yaml
 from dronecan.dsdl import CompoundType
 
-from .cpp import CppTypeRenderer, render_types_header
+from .dsdl import compound_dependencies
+from .cpp import CppTypeRenderer
 from .naming import is_cpp_identifier, is_cpp_qualified_identifier, to_pascal, to_snake, type_alias_name
 
 _MAX_NODE_NAME_BYTES = 80
@@ -93,6 +94,8 @@ class ModuleRenderer:
         self.cfg = cfg
         self.types = list(types)
         self.type_renderer = CppTypeRenderer(cfg.root_namespace, self.types)
+        self.detail_header_name = f"{self.cfg.module_name}_dsdl_detail.hpp"
+        self.type_header_names = {compound.full_name: self._type_header_name(compound) for compound in self.types}
         self.transfers = self._build_transfer_specs()
 
     def write(self) -> None:
@@ -103,11 +106,18 @@ class ModuleRenderer:
         self._write(out / "CMakeLists.txt", self.render_cmake())
         self._write(out / "info.cmake", self.render_info_cmake())
         self._write(out / "README.md", self.render_readme())
+        self._write(out / self.detail_header_name, self.render_detail_header())
+        for compound in self.types:
+            self._write(out / self.type_header_names[compound.full_name], self.render_type_header(compound))
         self._write(out / f"{self.cfg.module_name}.hpp", self.render_module_header())
 
     @staticmethod
     def _write(path: Path, text: str) -> None:
         path.write_text(text, encoding="utf-8", newline="\n")
+
+    @staticmethod
+    def _type_header_name(compound: CompoundType) -> str:
+        return f"{to_snake(type_alias_name(compound.full_name))}.hpp"
 
     def _build_transfer_specs(self) -> list[TransferSpec]:
         specs: list[TransferSpec] = []
@@ -160,6 +170,13 @@ class ModuleRenderer:
                 "node_name": self.cfg.node_name,
                 "node_status_period_ms": self.cfg.default_node_status_period_ms,
             },
+            "dsdl": [
+                {
+                    "type": item.full_name,
+                    "header": self.type_header_names[item.full_name],
+                }
+                for item in self.types
+            ],
         }
         return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
@@ -178,19 +195,34 @@ class ModuleRenderer:
         for alias in (self.cfg.module_name, pascal_alias):
             if alias != self.cfg.class_name and alias not in alias_lines:
                 alias_lines.append(f"using {alias} = {self.cfg.class_name};")
-        types_header = render_types_header(self.cfg.root_namespace, self.types).removeprefix("#pragma once\n\n")
+        type_includes = "\n".join(
+            f'#include "{self.type_header_names[item.full_name]}"' for item in self.types
+        )
         return f"""#pragma once
 
 // clang-format off
 {self.render_manifest()}
 // clang-format on
 
-{types_header}
+{type_includes}
 
 {self.render_application_class()}
 
 {chr(10).join(alias_lines)}
 """
+
+    def render_detail_header(self) -> str:
+        return self.type_renderer.render_detail_header()
+
+    def render_type_header(self, compound: CompoundType) -> str:
+        includes = [self.detail_header_name]
+        for dep in compound_dependencies(compound):
+            header = self.type_header_names.get(dep.full_name)
+            if header is None:
+                raise ValueError(f"DSDL dependency was not selected for generation: {dep.full_name}")
+            if header not in includes:
+                includes.append(header)
+        return self.type_renderer.render_compound_header(compound, includes)
 
     def render_manifest(self) -> str:
         data = {
@@ -211,6 +243,9 @@ class ModuleRenderer:
 
     def render_readme(self) -> str:
         type_list = "\n".join(f"- `{item.full_name}`" for item in self.types)
+        type_file_list = "\n".join(
+            f"- `{self.type_header_names[item.full_name]}`: `{item.full_name}`" for item in self.types
+        )
         example_yaml = yaml.safe_dump(
             {
                 "modules": [
@@ -242,8 +277,14 @@ Generated XRobot/LibXR DroneCAN module.
 
 ## 模块布局 / Module Layout
 
-- `{self.cfg.module_name}.hpp`: 单文件 XRobot 模块，包含 manifest、DSDL 类型、模块运行逻辑和 using 别名。
-- `{self.cfg.module_name}.hpp`: single-file XRobot module with manifest, DSDL types, runtime logic, and using aliases.
+- `{self.cfg.module_name}.hpp`: 单文件 XRobot Application facade，包含 manifest、模块运行逻辑和 using 别名。
+- `{self.cfg.module_name}.hpp`: single-file XRobot Application facade with manifest, runtime logic, and using aliases.
+- `{self.detail_header_name}`: DSDL 编解码公共 helper。
+- `{self.detail_header_name}`: shared helpers for generated DSDL codecs.
+
+## DSDL Headers
+
+{type_file_list}
 
 ## XRobot 示例 / XRobot Example
 
