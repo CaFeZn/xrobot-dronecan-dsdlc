@@ -10,7 +10,8 @@ The compiler reads DroneCAN/UAVCAN v0 `.uavcan` DSDL definitions and emits an
 XRobot module repository layout:
 
 - `module.yaml`
-- 根级单文件 `{module_name}.hpp` XRobot facade / root single-file `{module_name}.hpp` XRobot facade
+- 根级 `{module_name}.hpp` XRobot facade / root `{module_name}.hpp` XRobot facade
+- 根级 `{module_name}_dsdl_detail.hpp` 公共编解码 helper / root `{module_name}_dsdl_detail.hpp` shared codec helpers
 - 每个 DSDL 类型一个 `{type_name}.hpp` / one `{type_name}.hpp` per emitted DSDL type
 - `CMakeLists.txt`
 - C++ DSDL 编解码器拆分到独立类型头文件，`Application` 包装类保留在 facade 头文件内 / C++ DSDL codecs split into per-type headers, with the `Application` wrapper kept in the facade header
@@ -22,9 +23,10 @@ LibXR CAN bridge and libcanard runtime.
 
 ## 用法 / Usage
 
-从内置 DroneCAN 规范生成 ESC RawCommand 和 Status 模块：
+从内置 DroneCAN 规范生成 ESC RawCommand、Status 和 DynamicNodeId Allocation 模块：
 
-Generate a module for ESC RawCommand and Status from the bundled DroneCAN specs:
+Generate a module for ESC RawCommand, Status, and DynamicNodeId Allocation from
+the bundled DroneCAN specs:
 
 ```powershell
 python -m pip install -e .
@@ -32,9 +34,34 @@ xr_dronecan_dsdlc generate `
   --builtin-dsdl `
   --type uavcan.equipment.esc.RawCommand `
   --type uavcan.equipment.esc.Status `
-  --module-name dronecan_esc_generated `
-  --class-name DroneCANEscGenerated `
-  --output D:\Codes\Modules\dronecan_esc_generated
+  --type uavcan.protocol.dynamic_node_id.Allocation `
+  --module-name dronecan_dsdl `
+  --class-name DroneCANDsdl `
+  --root-namespace DroneCANGeneratedDsdl `
+  --output D:\Codes\Modules\dronecan_dsdl
+```
+
+生成的 `module.yaml` 中，`dsdl` 列表只需要记录 DSDL 类型名，不需要手写
+header 名称。header 文件名由生成器按类型名默认推导。
+
+In the generated `module.yaml`, the `dsdl` list records only DSDL type names.
+Header file names are derived by the generator and are not configured manually.
+
+```yaml
+dsdl:
+- type: uavcan.equipment.esc.RawCommand
+- type: uavcan.equipment.esc.Status
+- type: uavcan.protocol.dynamic_node_id.Allocation
+```
+
+默认生成的类型 header 名称示例：
+
+Default generated type header names:
+
+```text
+uavcan_equipment_esc_raw_command.hpp
+uavcan_equipment_esc_status.hpp
+uavcan_protocol_dynamic_node_id_allocation.hpp
 ```
 
 生成的模块可以在 XRobot 配置中这样引用：
@@ -43,14 +70,46 @@ The generated module can be referenced from XRobot configuration like:
 
 ```yaml
 modules:
-  - id: dronecan_esc_generated
-    name: dronecan_esc_generated
+  - id: dronecan_dsdl
+    name: dronecan_dsdl
     constructor_args:
       node_id: 10
       can_alias: can0
       timebase_alias: timebase
       node_name: org.libxr.dronecan.generated
       node_status_period_ms: 1000
+```
+
+## 自定义 DSDL / Custom DSDL
+
+自定义 DSDL 时，把 DSDL 根命名空间目录作为位置参数传给 `generate`，并用
+`--type` 指定完整类型名。保留 `--builtin-dsdl` 可以继续解析标准 `uavcan.*`
+依赖。
+
+For custom DSDL, pass the DSDL root namespace directory as a positional
+argument and specify full type names with `--type`. Keep `--builtin-dsdl` if
+your custom types reference standard `uavcan.*` dependencies.
+
+目录示例 / Directory example:
+
+```text
+CustomDSDL/
+  my_company/
+    actuator/
+      20000.MyCommand.uavcan
+```
+
+生成示例 / Generation example:
+
+```powershell
+xr_dronecan_dsdlc generate `
+  D:\Path\To\CustomDSDL\my_company `
+  --builtin-dsdl `
+  --type my_company.actuator.MyCommand `
+  --module-name dronecan_custom `
+  --class-name DroneCANCustom `
+  --root-namespace DroneCANCustomDsdl `
+  --output D:\Codes\Modules\dronecan_custom
 ```
 
 ## 说明 / Notes

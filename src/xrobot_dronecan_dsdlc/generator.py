@@ -280,11 +280,49 @@ Generated XRobot/LibXR DroneCAN module.
 
 {type_file_list}
 
+`module.yaml` 的 `dsdl` 列表只记录 `type`，header 名称由生成器按类型名默认推导。
+
+The `dsdl` list in `module.yaml` records only `type`; header names are derived
+from the DSDL type names by convention.
+
 ## XRobot 示例 / XRobot Example
 
 ```yaml
 {example_yaml}
 ```
+
+## 自定义 DSDL / Custom DSDL
+
+自定义 DSDL 时，把 DSDL 根命名空间目录作为 `generate` 的位置参数。
+例如 `my_company.actuator.MyCommand` 对应的源文件通常放在：
+
+```text
+CustomDSDL/
+  my_company/
+    actuator/
+      20000.MyCommand.uavcan
+```
+
+命令中应传入 `CustomDSDL/my_company`，并用 `--type my_company.actuator.MyCommand`
+指定要生成的类型。如果自定义类型引用标准 `uavcan.*` 类型，保留 `--builtin-dsdl`。
+如果有额外只用于依赖解析的 DSDL 根目录，可用 `-I` / `--lookup-dir` 添加。
+
+```powershell
+xr_dronecan_dsdlc generate `
+  D:/Path/To/CustomDSDL/my_company `
+  --builtin-dsdl `
+  --type my_company.actuator.MyCommand `
+  --module-name {self.cfg.module_name} `
+  --class-name {self.cfg.class_name} `
+  --root-namespace {self.cfg.root_namespace} `
+  --output D:/Codes/Modules/{self.cfg.module_name}
+```
+
+For custom DSDL, pass the root namespace directory to `generate`. The directory
+above is passed as `CustomDSDL/my_company`, while the type is selected with
+`--type my_company.actuator.MyCommand`. Keep `--builtin-dsdl` when standard
+`uavcan.*` dependencies are referenced, and use `-I` / `--lookup-dir` for extra
+dependency-only DSDL roots.
 
 该模块持有一个 `DroneCANCoreSupport::DroneCANNode`，通过 `OnMonitor()` 轮询，
 并暴露类型化的发布、请求、响应方法，以及可选的接收传输回调。
