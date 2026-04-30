@@ -64,9 +64,10 @@ uavcan_equipment_esc_status.hpp
 uavcan_protocol_dynamic_node_id_allocation.hpp
 ```
 
-生成的模块可以在 XRobot 配置中这样引用：
+在 `User/xrobot.yaml` 中实例化生成的 facade；`dronecan_core` 作为依赖由构建系统加入，不需要在这里单独实例化。
 
-The generated module can be referenced from XRobot configuration like:
+Instantiate the generated facade in `User/xrobot.yaml`. `dronecan_core` is added
+as a dependency by the build and does not need a separate entry here.
 
 ```yaml
 modules:

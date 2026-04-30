@@ -285,7 +285,12 @@ Generated XRobot/LibXR DroneCAN module.
 The `dsdl` list in `module.yaml` records only `type`; header names are derived
 from the DSDL type names by convention.
 
-## XRobot 示例 / XRobot Example
+## XRobot 实例化示例 / XRobot Instantiation Example
+
+在 `User/xrobot.yaml` 中实例化生成的 facade；`dronecan_core` 作为依赖由构建系统加入，不需要在这里单独实例化。
+
+Instantiate the generated facade in `User/xrobot.yaml`. `dronecan_core` is added
+as a dependency by the build and does not need a separate entry here.
 
 ```yaml
 {example_yaml}
