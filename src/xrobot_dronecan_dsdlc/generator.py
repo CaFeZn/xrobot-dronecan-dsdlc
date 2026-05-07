@@ -18,6 +18,7 @@ from .naming import is_cpp_identifier, is_cpp_qualified_identifier, to_pascal, t
 
 _MAX_NODE_NAME_BYTES = 80
 _NODE_NAME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+_GENERATED_DIR_NAME = "generated"
 
 
 def _cpp_string_literal(value: str) -> str:
@@ -103,19 +104,23 @@ class ModuleRenderer:
 
     def write(self) -> None:
         out = self.cfg.output
+        generated = out / _GENERATED_DIR_NAME
         out.mkdir(parents=True, exist_ok=True)
+        generated.mkdir(parents=True, exist_ok=True)
 
         self._write(out / "module.yaml", self.render_module_yaml())
         self._write(out / "CMakeLists.txt", self.render_cmake())
         self._write(out / "info.cmake", self.render_info_cmake())
         self._write(out / "README.md", self.render_readme())
-        self._write(out / self.detail_header_name, self.render_detail_header())
+        self._write(generated / self.detail_header_name, self.render_detail_header())
         for compound in self.types:
-            self._write(out / self.type_header_names[compound.full_name], self.render_type_header(compound))
-        self._write(out / f"{self.cfg.module_name}.hpp", self.render_module_header())
+            self._write(generated / self.type_header_names[compound.full_name], self.render_type_header(compound))
+        self._write(generated / f"{self.cfg.module_name}.hpp", self.render_module_header())
+        self._write(out / f"{self.cfg.module_name}.hpp", self.render_root_header())
 
     @staticmethod
     def _write(path: Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
 
     @staticmethod
@@ -180,6 +185,7 @@ class ModuleRenderer:
     def render_cmake(self) -> str:
         return """target_include_directories(xr PUBLIC
   ${CMAKE_CURRENT_LIST_DIR}
+  ${CMAKE_CURRENT_LIST_DIR}/generated
 )
 """
 
@@ -206,6 +212,13 @@ class ModuleRenderer:
 {self.render_application_class()}
 
 {chr(10).join(alias_lines)}
+"""
+
+    def render_root_header(self) -> str:
+        return f"""#pragma once
+
+// Stable XRobot module entry. Generated implementation lives under `{_GENERATED_DIR_NAME}/`.
+#include "{_GENERATED_DIR_NAME}/{self.cfg.module_name}.hpp"
 """
 
     def render_detail_header(self) -> str:
@@ -274,19 +287,23 @@ Generated XRobot/LibXR DroneCAN module.
 
 ## 模块布局 / Module Layout
 
-- `{self.cfg.module_name}.hpp`: 单文件 XRobot Application facade，包含 manifest、模块运行逻辑和 using 别名。
-- `{self.cfg.module_name}.hpp`: single-file XRobot Application facade with manifest, runtime logic, and using aliases.
-- `{self.detail_header_name}`: DSDL 编解码公共 helper。
-- `{self.detail_header_name}`: shared helpers for generated DSDL codecs.
+- `{self.cfg.module_name}.hpp`: 稳定 XRobot 模块入口，只转发到 `generated/{self.cfg.module_name}.hpp`。
+- `{self.cfg.module_name}.hpp`: stable XRobot module entry that forwards to `generated/{self.cfg.module_name}.hpp`.
+- `generated/{self.cfg.module_name}.hpp`: 生成的 XRobot Application facade，包含 manifest、模块运行逻辑和 using 别名。
+- `generated/{self.cfg.module_name}.hpp`: generated XRobot Application facade with manifest, runtime logic, and using aliases.
+- `generated/{self.detail_header_name}`: DSDL 编解码公共 helper。
+- `generated/{self.detail_header_name}`: shared helpers for generated DSDL codecs.
 
 ## DSDL Headers
 
 {type_file_list}
 
-`module.yaml` 的 `dsdl` 列表只记录 `type`，header 名称由生成器按类型名默认推导。
+`module.yaml` 的 `dsdl` 列表只记录 `type`；生成头文件名由 DSDL 类型名按约定自动推导。
+所有生成产物都在 `generated/` 子目录。
 
-The `dsdl` list in `module.yaml` records only `type`; header names are derived
-from the DSDL type names by convention.
+The `dsdl` list in `module.yaml` records only `type`; generated header names are
+derived from DSDL type names by convention. All generated artifacts are kept
+under the `generated/` subdirectory.
 
 ## XRobot 实例化示例 / XRobot Instantiation Example
 
@@ -371,6 +388,7 @@ callbacks for received transfers.
         )
 
         return f"""#include <array>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 
@@ -381,6 +399,7 @@ extern "C"
 
 #include "app_framework.hpp"
 #include "can.hpp"
+#include "dronecan_core/CanPoller.hpp"
 #include "dronecan_core/DroneCANNode.hpp"
 #include "dronecan_core/dronecan_types.hpp"
 #include "libxr.hpp"
@@ -402,6 +421,10 @@ class {self.cfg.class_name} final : public LibXR::Application
         timebase_(*hw.FindOrExit<LibXR::Timebase>({{NormalizeCString(timebase_alias, "timebase")}})),
         node_(can_, timebase_, node_arena_.data(), node_arena_.size(), MakeNodeConfig(node_status_period_ms)){init_handlers}
   {{
+    char poller_alias[32]{{}};
+    MakePollerAlias(NormalizeCString(can_alias, "can0"), poller_alias, sizeof(poller_alias));
+    can_poller_ = hw.Find<DroneCANCoreSupport::CanPoller>(
+        {{poller_alias, "can_poller", "dronecan_poller", "can1_poller", "can0_poller"}});
     (void)node_.SetNodeID(node_id);
     node_.SetNodeInfo(MakeNodeInfo(NormalizeCString(node_name, {_cpp_string_literal(self.cfg.node_name)})));
     node_.SetNodeStatusMode(LibXR::DroneCAN::NodeMode::OPERATIONAL);
@@ -411,6 +434,10 @@ class {self.cfg.class_name} final : public LibXR::Application
 
   void OnMonitor() override
   {{
+    if (can_poller_ != nullptr)
+    {{
+      can_poller_->Poll();
+    }}
     node_.Poll();
   }}
 
@@ -439,6 +466,17 @@ class {self.cfg.class_name} final : public LibXR::Application
     return period_ms == 0U ? 1U : period_ms;
   }}
 
+  static void MakePollerAlias(const char* can_alias, char* out, std::size_t out_size) noexcept
+  {{
+    if ((out == nullptr) || (out_size == 0U))
+    {{
+      return;
+    }}
+    const char* normalized = NormalizeCString(can_alias, "can0");
+    (void)std::snprintf(out, out_size, "%s_poller", normalized);
+    out[out_size - 1U] = '\\0';
+  }}
+
   static LibXR::DroneCAN::Config MakeNodeConfig(std::uint32_t node_status_period_ms) noexcept
   {{
     LibXR::DroneCAN::Config config{{}};
@@ -459,6 +497,7 @@ class {self.cfg.class_name} final : public LibXR::Application
 
   LibXR::CAN& can_;
   LibXR::Timebase& timebase_;
+  DroneCANCoreSupport::CanPoller* can_poller_ = nullptr;
   std::array<std::uint8_t, kNodeArenaSize> node_arena_{{}};
   DroneCANCoreSupport::DroneCANNode node_;
 {chr(10).join(member_lines)}

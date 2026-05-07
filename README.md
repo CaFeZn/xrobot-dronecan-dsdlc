@@ -10,9 +10,10 @@ The compiler reads DroneCAN/UAVCAN v0 `.uavcan` DSDL definitions and emits an
 XRobot module repository layout:
 
 - `module.yaml`
-- 根级 `{module_name}.hpp` XRobot facade / root `{module_name}.hpp` XRobot facade
-- 根级 `{module_name}_dsdl_detail.hpp` 公共编解码 helper / root `{module_name}_dsdl_detail.hpp` shared codec helpers
-- 每个 DSDL 类型一个 `{type_name}.hpp` / one `{type_name}.hpp` per emitted DSDL type
+- 根级 `{module_name}.hpp` 稳定 XRobot 入口 / root `{module_name}.hpp` stable XRobot entry
+- `generated/{module_name}.hpp` 生成的 XRobot facade / generated XRobot facade
+- `generated/{module_name}_dsdl_detail.hpp` 公共编解码 helper / shared codec helpers
+- `generated/{type_name}.hpp` 每个 DSDL 类型一个生成头 / one generated header per emitted DSDL type
 - `CMakeLists.txt`
 - C++ DSDL 编解码器拆分到独立类型头文件，`Application` 包装类保留在 facade 头文件内 / C++ DSDL codecs split into per-type headers, with the `Application` wrapper kept in the facade header
 
@@ -48,11 +49,14 @@ xr_dronecan_dsdlc generate `
   --output D:\Codes\DroneCAN\dronecan_dsdl
 ```
 
-生成的 `module.yaml` 中，`dsdl` 列表只需要记录 DSDL 类型名，不需要手写
-header 名称。header 文件名由生成器按类型名默认推导。
+生成的 `module.yaml` 中，`dsdl` 列表只记录 DSDL 类型名；
+header 文件名由生成器按类型名默认推导。所有生成产物都放在 `generated/` 子目录，
+模块根目录只保留稳定入口和配置。
 
 In the generated `module.yaml`, the `dsdl` list records only DSDL type names.
-Header file names are derived by the generator and are not configured manually.
+Header file names are derived by the generator from type names. All generated
+artifacts live under `generated/`; the module root keeps only the stable entry
+and configuration.
 
 ```yaml
 dsdl:
@@ -66,9 +70,9 @@ dsdl:
 Default generated type header names:
 
 ```text
-uavcan_equipment_esc_raw_command.hpp
-uavcan_equipment_esc_status.hpp
-uavcan_protocol_dynamic_node_id_allocation.hpp
+generated/uavcan_equipment_esc_raw_command.hpp
+generated/uavcan_equipment_esc_status.hpp
+generated/uavcan_protocol_dynamic_node_id_allocation.hpp
 ```
 
 在 `User/xrobot.yaml` 中实例化生成的 facade；`dronecan_core` 作为依赖由构建系统加入，不需要在这里单独实例化。

@@ -44,6 +44,9 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert (out / "dronecan_esc_generated.hpp").exists()
     assert sorted(path.name for path in out.glob("*.hpp")) == [
         "dronecan_esc_generated.hpp",
+    ]
+    assert sorted(path.name for path in (out / "generated").glob("*.hpp")) == [
+        "dronecan_esc_generated.hpp",
         "dronecan_esc_generated_dsdl_detail.hpp",
         "uavcan_equipment_esc_raw_command.hpp",
         "uavcan_equipment_esc_status.hpp",
@@ -59,15 +62,20 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "header: dronecan_esc_generated.hpp" in module_yaml
     assert "type: uavcan.equipment.esc.RawCommand" in module_yaml
     assert "uavcan_equipment_esc_raw_command.hpp" not in module_yaml
+    assert "output_dir: generated" not in module_yaml
+    assert "facade: generated/dronecan_esc_generated.hpp" not in module_yaml
 
     cmake = (out / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "target_include_directories(xr PUBLIC" in cmake
     assert "${CMAKE_CURRENT_LIST_DIR}" in cmake
+    assert "${CMAKE_CURRENT_LIST_DIR}/generated" in cmake
     assert "target_sources" not in cmake
-    assert "/include" not in cmake
     assert ".cpp" not in cmake
 
-    module_hpp = (out / "dronecan_esc_generated.hpp").read_text(encoding="utf-8")
+    root_hpp = (out / "dronecan_esc_generated.hpp").read_text(encoding="utf-8")
+    assert '#include "generated/dronecan_esc_generated.hpp"' in root_hpp
+
+    module_hpp = (out / "generated" / "dronecan_esc_generated.hpp").read_text(encoding="utf-8")
     assert "/* === MODULE MANIFEST V2 ===" in module_hpp
     assert "constructor_args:" in module_hpp
     assert "- node_id: 10" in module_hpp
@@ -85,7 +93,7 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert '#include "uavcan_equipment_esc_status.hpp"' in module_hpp
     assert "struct RawCommand" not in module_hpp
 
-    raw_command_hpp = (out / "uavcan_equipment_esc_raw_command.hpp").read_text(encoding="utf-8")
+    raw_command_hpp = (out / "generated" / "uavcan_equipment_esc_raw_command.hpp").read_text(encoding="utf-8")
     assert '#include "dronecan_esc_generated_dsdl_detail.hpp"' in raw_command_hpp
     assert "kDataTypeId = 1030U" in raw_command_hpp
     assert "0x217F5C87D7EC951DULL" in raw_command_hpp
@@ -203,7 +211,7 @@ def test_generated_node_name_is_yaml_and_cpp_safe(tmp_path: Path):
 
     generate_module(cfg, selected)
 
-    module_hpp = (cfg.output / "dronecan_node_status.hpp").read_text(encoding="utf-8")
+    module_hpp = (cfg.output / "generated" / "dronecan_node_status.hpp").read_text(encoding="utf-8")
     manifest = _load_manifest(module_hpp)
     constructor_args = {}
     for item in manifest["constructor_args"]:
@@ -224,7 +232,7 @@ def test_alias_collisions_are_not_emitted(tmp_path: Path):
         root_namespace="FooTypes",
     )
     generate_module(cfg, selected)
-    module_hpp = (cfg.output / "foo.hpp").read_text(encoding="utf-8")
+    module_hpp = (cfg.output / "generated" / "foo.hpp").read_text(encoding="utf-8")
 
     assert "class Foo final" in module_hpp
     assert "using foo = Foo;" in module_hpp
@@ -242,8 +250,8 @@ def test_nested_compound_tao_and_bounds_generation(tmp_path: Path):
     )
 
     generate_module(cfg, selected)
-    detail_hpp = (cfg.output / "dronecan_get_node_info_dsdl_detail.hpp").read_text(encoding="utf-8")
-    get_node_info_hpp = (cfg.output / "uavcan_protocol_get_node_info.hpp").read_text(encoding="utf-8")
+    detail_hpp = (cfg.output / "generated" / "dronecan_get_node_info_dsdl_detail.hpp").read_text(encoding="utf-8")
+    get_node_info_hpp = (cfg.output / "generated" / "uavcan_protocol_get_node_info.hpp").read_text(encoding="utf-8")
 
     assert "CanWriteBits(std::size_t buffer_size" in detail_hpp
     assert '#include "uavcan_protocol_hardware_version.hpp"' in get_node_info_hpp
@@ -265,8 +273,8 @@ def test_union_tag_and_service_tao_generation(tmp_path: Path):
     )
 
     generate_module(cfg, selected)
-    getset_hpp = (cfg.output / "uavcan_protocol_param_get_set.hpp").read_text(encoding="utf-8")
-    value_hpp = (cfg.output / "uavcan_protocol_param_value.hpp").read_text(encoding="utf-8")
+    getset_hpp = (cfg.output / "generated" / "uavcan_protocol_param_get_set.hpp").read_text(encoding="utf-8")
+    value_hpp = (cfg.output / "generated" / "uavcan_protocol_param_value.hpp").read_text(encoding="utf-8")
 
     assert "if (msg.union_tag >" in value_hpp
     assert '#include "uavcan_protocol_param_value.hpp"' in getset_hpp
