@@ -226,7 +226,12 @@ class ModuleRenderer:
 
     def render_manifest(self) -> str:
         data = {
-            "module_description": "由 DroneCAN DSDL 生成的 XRobot/LibXR 模块 / Generated XRobot/LibXR module from DroneCAN DSDL",
+            "module_description": (
+                "DroneCAN DSDL facade. Default instance configures the base node "
+                "and publishes uavcan.protocol.NodeStatus; project-specific DSDL "
+                "handlers are generated separately and runtime values live in "
+                "User/xrobot.yaml."
+            ),
             "constructor_args": [
                 {"node_id": self.cfg.default_node_id},
                 {"can_alias": "can0"},
