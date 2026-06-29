@@ -35,6 +35,13 @@ Prefer writing the output to a standalone XRobot module repository, such as a
 local clone of `dronecan_dsdl`; consuming projects should then synchronize that
 repository through `modules.yaml` / `sources.yaml`.
 
+不传 `--type` 时，生成器只输出 `uavcan.protocol.NodeStatus`，也就是基础节点健康状态报文。
+其它 LED、动态 ID 或项目自定义 DSDL 类型应在用户工程配置里显式传入。
+
+When `--type` is omitted, only `uavcan.protocol.NodeStatus` is emitted for the
+base node health report. LED, dynamic-ID, or project-specific DSDL types should
+be requested explicitly by the consuming project.
+
 ```powershell
 python -m pip install -e .
 xr_dronecan_dsdlc generate `

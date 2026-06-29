@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("dsdl_dir", nargs="*", type=Path, help="DSDL 根命名空间目录 / DSDL root namespace directories")
     gen.add_argument("-I", "--lookup-dir", action="append", type=Path, default=[], help="额外 DSDL 查找根目录 / Additional DSDL lookup root")
     gen.add_argument("--builtin-dsdl", action="store_true", help="使用内置 DroneCAN DSDL 根目录 / Use bundled DroneCAN DSDL roots")
-    gen.add_argument("--type", action="append", default=[], help="要输出的完整 DSDL 类型名，可重复 / Full DSDL type name to emit; repeatable")
+    gen.add_argument("--type", action="append", default=None, help="要输出的完整 DSDL 类型名，可重复；默认 uavcan.protocol.NodeStatus / Full DSDL type name to emit; repeatable; defaults to uavcan.protocol.NodeStatus")
     gen.add_argument("-o", "--output", required=True, type=Path, help="生成模块输出目录 / Generated module output directory")
     gen.add_argument("--module-name", default="dronecan_generated", help="XRobot 模块名 / XRobot module name")
     gen.add_argument("--class-name", help="生成的 XRobot Application 类名 / Generated XRobot Application class name")
@@ -45,7 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "generate":
         dsdl_set = load_dsdl(args.dsdl_dir, args.lookup_dir, include_builtin=args.builtin_dsdl)
-        selected = dsdl_set.select_with_dependencies(args.type)
+        requested_types = args.type if args.type is not None else ["uavcan.protocol.NodeStatus"]
+        selected = dsdl_set.select_with_dependencies(requested_types)
         class_name = args.class_name or default_class_name(args.module_name)
         cfg = GenerationConfig(
             output=args.output,

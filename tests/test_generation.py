@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from xrobot_dronecan_dsdlc.cli import main
 from xrobot_dronecan_dsdlc.dsdl import load_dsdl
 from xrobot_dronecan_dsdlc.generator import GenerationConfig, generate_module
 
@@ -94,6 +95,37 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "kDataTypeId = 1030U" in raw_command_hpp
     assert "0x217F5C87D7EC951DULL" in raw_command_hpp
     assert "std::array<std::int16_t, 20U> cmd" in raw_command_hpp
+
+
+def test_cli_defaults_to_node_status_only(tmp_path: Path):
+    out = tmp_path / "dronecan_default"
+
+    result = main(
+        [
+            "generate",
+            "--builtin-dsdl",
+            "--module-name",
+            "dronecan_default",
+            "--class-name",
+            "DroneCANDefault",
+            "--root-namespace",
+            "DroneCANDefaultTypes",
+            "--output",
+            str(out),
+        ]
+    )
+
+    assert result == 0
+    assert sorted(path.name for path in (out / "generated").glob("*.hpp")) == [
+        "dronecan_default.hpp",
+        "dronecan_default_dsdl_detail.hpp",
+        "uavcan_protocol_node_status.hpp",
+    ]
+    root_hpp = (out / "dronecan_default.hpp").read_text(encoding="utf-8")
+    module_hpp = (out / "generated" / "dronecan_default.hpp").read_text(encoding="utf-8")
+    assert "/* === MODULE MANIFEST V2 ===" in root_hpp
+    assert "/* === MODULE MANIFEST V2 ===" not in module_hpp
+    assert "using dronecan_default = DroneCANDefault;" in module_hpp
 
 
 def test_generation_rejects_invalid_cpp_names(tmp_path: Path):
