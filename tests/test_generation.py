@@ -39,7 +39,8 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     generate_module(cfg, selected)
 
     out = cfg.output
-    assert (out / "module.yaml").exists()
+    assert not (out / "module.yaml").exists()
+    assert (out / ".gitignore").exists()
     assert (out / "CMakeLists.txt").exists()
     assert (out / "dronecan_esc_generated.hpp").exists()
     assert sorted(path.name for path in out.glob("*.hpp")) == [
@@ -56,14 +57,8 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert not (out / "include" / "dronecan_esc_generated" / "dronecan_esc_generated_types.hpp").exists()
     assert not (out / "include" / "dronecan_esc_generated" / "dronecan_esc_generated_generated.hpp").exists()
 
-    module_yaml = (out / "module.yaml").read_text(encoding="utf-8")
-    assert "name: dronecan_esc_generated" in module_yaml
-    assert "class_name: DroneCANEscGenerated" in module_yaml
-    assert "header: dronecan_esc_generated.hpp" in module_yaml
-    assert "type: uavcan.equipment.esc.RawCommand" in module_yaml
-    assert "uavcan_equipment_esc_raw_command.hpp" not in module_yaml
-    assert "output_dir: generated" not in module_yaml
-    assert "facade: generated/dronecan_esc_generated.hpp" not in module_yaml
+    gitignore = (out / ".gitignore").read_text(encoding="utf-8")
+    assert "/generated/" in gitignore
 
     cmake = (out / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "target_include_directories(xr PUBLIC" in cmake
@@ -73,18 +68,19 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert ".cpp" not in cmake
 
     root_hpp = (out / "dronecan_esc_generated.hpp").read_text(encoding="utf-8")
+    assert "/* === MODULE MANIFEST V2 ===" in root_hpp
+    assert "constructor_args:" in root_hpp
+    assert "- node_id: 10" in root_hpp
+    assert "- can_alias: can0" in root_hpp
+    assert "template_args: []" in root_hpp
+    assert "required_hardware: can0 timebase" in root_hpp
+    assert "depends:" in root_hpp
+    assert "- CaFeZn/dronecan_core" in root_hpp
+    assert "=== END MANIFEST === */" in root_hpp
     assert '#include "generated/dronecan_esc_generated.hpp"' in root_hpp
 
     module_hpp = (out / "generated" / "dronecan_esc_generated.hpp").read_text(encoding="utf-8")
-    assert "/* === MODULE MANIFEST V2 ===" in module_hpp
-    assert "constructor_args:" in module_hpp
-    assert "- node_id: 10" in module_hpp
-    assert "- can_alias: can0" in module_hpp
-    assert "template_args: []" in module_hpp
-    assert "required_hardware: can0 timebase" in module_hpp
-    assert "depends:" in module_hpp
-    assert "- CaFeZn/dronecan_core" in module_hpp
-    assert "=== END MANIFEST === */" in module_hpp
+    assert "/* === MODULE MANIFEST V2 ===" not in module_hpp
     assert "using dronecan_esc_generated = DroneCANEscGenerated;" in module_hpp
     assert "inline DroneCANEscGenerated::DroneCANEscGenerated(" not in module_hpp
     assert "DroneCANEscGenerated(LibXR::HardwareContainer& hw," in module_hpp
@@ -211,8 +207,9 @@ def test_generated_node_name_is_yaml_and_cpp_safe(tmp_path: Path):
 
     generate_module(cfg, selected)
 
+    root_hpp = (cfg.output / "dronecan_node_status.hpp").read_text(encoding="utf-8")
     module_hpp = (cfg.output / "generated" / "dronecan_node_status.hpp").read_text(encoding="utf-8")
-    manifest = _load_manifest(module_hpp)
+    manifest = _load_manifest(root_hpp)
     constructor_args = {}
     for item in manifest["constructor_args"]:
         constructor_args.update(item)

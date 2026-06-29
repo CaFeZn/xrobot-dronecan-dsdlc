@@ -9,11 +9,11 @@ DroneCAN DSDL compiler for XRobot and LibXR projects.
 The compiler reads DroneCAN/UAVCAN v0 `.uavcan` DSDL definitions and emits an
 XRobot module repository layout:
 
-- `module.yaml`
-- 根级 `{module_name}.hpp` 稳定 XRobot 入口 / root `{module_name}.hpp` stable XRobot entry
+- 根级 `{module_name}.hpp` 稳定 XRobot 入口和 `MODULE MANIFEST V2` / root `{module_name}.hpp` stable XRobot entry and `MODULE MANIFEST V2`
 - `generated/{module_name}.hpp` 生成的 XRobot facade / generated XRobot facade
 - `generated/{module_name}_dsdl_detail.hpp` 公共编解码 helper / shared codec helpers
 - `generated/{type_name}.hpp` 每个 DSDL 类型一个生成头 / one generated header per emitted DSDL type
+- `.gitignore`，默认忽略 `generated/` / `.gitignore`, ignoring `generated/` by default
 - `CMakeLists.txt`
 - C++ DSDL 编解码器拆分到独立类型头文件，`Application` 包装类保留在 facade 头文件内 / C++ DSDL codecs split into per-type headers, with the `Application` wrapper kept in the facade header
 
@@ -49,21 +49,15 @@ xr_dronecan_dsdlc generate `
   --output D:\Codes\DroneCAN\dronecan_dsdl
 ```
 
-生成的 `module.yaml` 中，`dsdl` 列表只记录 DSDL 类型名；
-header 文件名由生成器按类型名默认推导。所有生成产物都放在 `generated/` 子目录，
-模块根目录只保留稳定入口和配置。
+XRobot 模块元数据写在根级 `{module_name}.hpp` 的 `MODULE MANIFEST V2` 中；
+生成器不再输出 `module.yaml`。DSDL 类型 header 名称由生成器按类型名默认推导。
+所有项目相关生成产物都放在 `generated/` 子目录，模块仓库默认通过 `.gitignore`
+忽略该目录。
 
-In the generated `module.yaml`, the `dsdl` list records only DSDL type names.
-Header file names are derived by the generator from type names. All generated
-artifacts live under `generated/`; the module root keeps only the stable entry
-and configuration.
-
-```yaml
-dsdl:
-- type: uavcan.equipment.esc.RawCommand
-- type: uavcan.equipment.esc.Status
-- type: uavcan.protocol.dynamic_node_id.Allocation
-```
+XRobot module metadata is stored in `MODULE MANIFEST V2` inside the root
+`{module_name}.hpp`; the generator no longer emits `module.yaml`. Type header
+names are derived from DSDL type names. Project-specific generated artifacts
+live under `generated/`, which is ignored by the generated module `.gitignore`.
 
 默认生成的类型 header 名称示例：
 
