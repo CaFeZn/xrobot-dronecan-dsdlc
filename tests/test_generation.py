@@ -82,6 +82,8 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
 
     module_hpp = (out / "generated" / "dronecan_esc_generated.hpp").read_text(encoding="utf-8")
     assert "/* === MODULE MANIFEST V2 ===" not in module_hpp
+    assert "using UavcanEquipmentEscRawCommand = ::DroneCANEscTypes::uavcan::equipment::esc::RawCommand;" in module_hpp
+    assert "using UavcanEquipmentEscStatus = ::DroneCANEscTypes::uavcan::equipment::esc::Status;" in module_hpp
     assert "using dronecan_esc_generated = DroneCANEscGenerated;" in module_hpp
     assert "inline DroneCANEscGenerated::DroneCANEscGenerated(" not in module_hpp
     assert "DroneCANEscGenerated(LibXR::HardwareContainer& hw," in module_hpp

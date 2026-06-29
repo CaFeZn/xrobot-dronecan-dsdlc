@@ -356,10 +356,22 @@ callbacks for received transfers.
 """
 
     def render_application_class(self) -> str:
+        type_alias_lines = []
         callback_lines = []
         public_method_lines = []
         private_method_lines = []
         member_lines = []
+        for compound in self.types:
+            base_alias = type_alias_name(compound.full_name)
+            if compound.kind == CompoundType.KIND_MESSAGE:
+                type_alias_lines.append(f"  using {base_alias} = {self.type_renderer.qualified_struct(compound, None)};")
+            else:
+                type_alias_lines.append(
+                    f"  using {base_alias}Request = {self.type_renderer.qualified_struct(compound, 'request')};"
+                )
+                type_alias_lines.append(
+                    f"  using {base_alias}Response = {self.type_renderer.qualified_struct(compound, 'response')};"
+                )
         for spec in self.transfers:
             callback_lines.append(
                 f"  using {spec.callback_type} = void (*)(void*, const LibXR::DroneCAN::TransferMetadata&, const {spec.cpp_type}&);"
@@ -405,6 +417,8 @@ extern "C"
 class {self.cfg.class_name} final : public LibXR::Application
 {{
  public:
+{chr(10).join(type_alias_lines)}
+
 {chr(10).join(callback_lines) if callback_lines else "  // 未选择默认数据类型 ID，因此不会生成传输处理器。 / No default data type IDs were selected; no transfer handlers are generated."}
 
   {self.cfg.class_name}(LibXR::HardwareContainer& hw,
