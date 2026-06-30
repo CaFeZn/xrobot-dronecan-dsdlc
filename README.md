@@ -35,12 +35,50 @@ Prefer writing the output to a standalone XRobot module repository, such as a
 local clone of `dronecan_dsdl`; consuming projects should then synchronize that
 repository through `modules.yaml` / `sources.yaml`.
 
-不传 `--type` 时，生成器只输出 `uavcan.protocol.NodeStatus`，也就是基础节点健康状态报文。
-其它 LED、动态 ID 或项目自定义 DSDL 类型应在用户工程配置里显式传入。
+不传 `--type`、且没有从 `--xrobot-yaml` 读取 `generator.dsdl.types` 时，生成器只输出
+`uavcan.protocol.NodeStatus`，也就是基础节点健康状态报文。其它 LED、动态 ID 或项目自定义
+DSDL 类型应在用户工程配置里显式传入。
 
-When `--type` is omitted, only `uavcan.protocol.NodeStatus` is emitted for the
-base node health report. LED, dynamic-ID, or project-specific DSDL types should
-be requested explicitly by the consuming project.
+When `--type` is omitted and `generator.dsdl.types` is not read from
+`--xrobot-yaml`, only `uavcan.protocol.NodeStatus` is emitted for the base node
+health report. LED, dynamic-ID, or project-specific DSDL types should be
+requested explicitly by the consuming project.
+
+推荐在用户工程 `User/xrobot.yaml` 的模块项里保存生成配置：
+
+Prefer storing generation inputs in the module entry of the consuming project's
+`User/xrobot.yaml`:
+
+```yaml
+modules:
+  - id: dronecan_dsdl
+    name: dronecan_dsdl
+    constructor_args:
+      node_id: 10
+      can_alias: can0
+      timebase_alias: timebase
+      node_name: org.libxr.dronecan.generated
+      node_status_period_ms: 1000
+    generator:
+      dsdl:
+        builtin: true
+        types:
+          - uavcan.equipment.indication.LightsCommand
+          - uavcan.protocol.dynamic_node_id.Allocation
+        class_name: DroneCANDsdl
+        root_namespace: DroneCANGeneratedDsdl
+        core_module_id: CaFeZn/dronecan_core
+```
+
+然后从 YAML 生成：
+
+Then generate from YAML:
+
+```powershell
+xr_dronecan_dsdlc generate `
+  --xrobot-yaml User/xrobot.yaml `
+  --module-id dronecan_dsdl
+```
 
 ```powershell
 python -m pip install -e .

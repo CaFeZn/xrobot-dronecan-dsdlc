@@ -111,7 +111,9 @@ class ModuleRenderer:
         self._write(out / ".gitignore", self.render_gitignore())
         self._write(out / "CMakeLists.txt", self.render_cmake())
         self._write(out / "info.cmake", self.render_info_cmake())
-        self._write(out / "README.md", self.render_readme())
+        readme = out / "README.md"
+        if not readme.exists():
+            self._write(readme, self.render_readme())
         self._write(generated / self.detail_header_name, self.render_detail_header())
         for compound in self.types:
             self._write(generated / self.type_header_names[compound.full_name], self.render_type_header(compound))

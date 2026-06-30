@@ -99,6 +99,24 @@ def test_generate_xrobot_module_layout(tmp_path: Path):
     assert "std::array<std::int16_t, 20U> cmd" in raw_command_hpp
 
 
+def test_generation_preserves_existing_module_readme(tmp_path: Path):
+    dsdl_set = load_dsdl([], include_builtin=True)
+    selected = dsdl_set.select_with_dependencies(["uavcan.protocol.NodeStatus"])
+    output = tmp_path / "dronecan_with_readme"
+    output.mkdir()
+    (output / "README.md").write_text("# generic module README\n", encoding="utf-8")
+    cfg = GenerationConfig(
+        output=output,
+        module_name="dronecan_with_readme",
+        class_name="DroneCANWithReadme",
+        root_namespace="DroneCANWithReadmeTypes",
+    )
+
+    generate_module(cfg, selected)
+
+    assert (output / "README.md").read_text(encoding="utf-8") == "# generic module README\n"
+
+
 def test_cli_defaults_to_node_status_only(tmp_path: Path):
     out = tmp_path / "dronecan_default"
 
@@ -128,6 +146,113 @@ def test_cli_defaults_to_node_status_only(tmp_path: Path):
     assert "/* === MODULE MANIFEST V2 ===" in root_hpp
     assert "/* === MODULE MANIFEST V2 ===" not in module_hpp
     assert "using dronecan_default = DroneCANDefault;" in module_hpp
+
+
+def test_cli_reads_generation_config_from_xrobot_yaml(tmp_path: Path):
+    user_dir = tmp_path / "user"
+    user_dir.mkdir()
+    yaml_path = user_dir / "xrobot.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "constexprs": {
+                    "DroneCANNodeId": {"type": "std::uint8_t", "value": 42},
+                    "DroneCANNodeStatusPeriodMs": {"type": "std::uint32_t", "value": 1000},
+                },
+                "modules": [
+                    {
+                        "id": "dronecan_dsdl",
+                        "name": "dronecan_dsdl",
+                        "constructor_args": {
+                            "node_id": {"constexpr": "DroneCANNodeId"},
+                            "can_alias": "can0",
+                            "timebase_alias": "timebase",
+                            "node_name": "org.xrobot.dronecan_led.v1",
+                            "node_status_period_ms": {"constexpr": "DroneCANNodeStatusPeriodMs"},
+                        },
+                        "generator": {
+                            "dsdl": {
+                                "builtin": True,
+                                "types": [
+                                    "uavcan.equipment.indication.LightsCommand",
+                                    "uavcan.protocol.dynamic_node_id.Allocation",
+                                ],
+                                "class_name": "DroneCANDsdl",
+                                "root_namespace": "DroneCANGeneratedDsdl",
+                                "core_module_id": "CaFeZn/dronecan_core",
+                            }
+                        },
+                    },
+                    {"id": "ws2812", "name": "WS2812"},
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["generate", "--xrobot-yaml", str(yaml_path), "--module-id", "dronecan_dsdl"])
+
+    out = tmp_path / "Modules" / "dronecan_dsdl"
+    assert result == 0
+    assert sorted(path.name for path in (out / "generated").glob("*.hpp")) == [
+        "dronecan_dsdl.hpp",
+        "dronecan_dsdl_dsdl_detail.hpp",
+        "uavcan_equipment_indication_lights_command.hpp",
+        "uavcan_equipment_indication_rg_b565.hpp",
+        "uavcan_equipment_indication_single_light_command.hpp",
+        "uavcan_protocol_dynamic_node_id_allocation.hpp",
+    ]
+
+    root_hpp = (out / "dronecan_dsdl.hpp").read_text(encoding="utf-8")
+    module_hpp = (out / "generated" / "dronecan_dsdl.hpp").read_text(encoding="utf-8")
+    assert "- node_id: 42" in root_hpp
+    assert "- node_name: org.xrobot.dronecan_led.v1" in root_hpp
+    assert "DroneCANDsdl(LibXR::HardwareContainer& hw," in module_hpp
+    assert 'const char* node_name = "org.xrobot.dronecan_led.v1"' in module_hpp
+    assert "using UavcanEquipmentIndicationLightsCommand" in module_hpp
+    assert "using UavcanProtocolDynamicNodeIdAllocation" in module_hpp
+
+
+def test_cli_xrobot_yaml_defaults_to_builtin_node_status(tmp_path: Path):
+    user_dir = tmp_path / "user"
+    user_dir.mkdir()
+    yaml_path = user_dir / "xrobot.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "modules": [
+                    {
+                        "id": "dronecan_default",
+                        "name": "dronecan_default",
+                        "constructor_args": {
+                            "node_id": 11,
+                            "can_alias": "can0",
+                            "timebase_alias": "timebase",
+                            "node_name": "org.xrobot.default",
+                            "node_status_period_ms": 500,
+                        },
+                    }
+                ]
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["generate", "--xrobot-yaml", str(yaml_path)])
+
+    out = tmp_path / "Modules" / "dronecan_default"
+    assert result == 0
+    assert sorted(path.name for path in (out / "generated").glob("*.hpp")) == [
+        "dronecan_default.hpp",
+        "dronecan_default_dsdl_detail.hpp",
+        "uavcan_protocol_node_status.hpp",
+    ]
+    module_hpp = (out / "generated" / "dronecan_default.hpp").read_text(encoding="utf-8")
+    assert "using UavcanProtocolNodeStatus" in module_hpp
+    assert "std::uint8_t node_id = 11U" in module_hpp
+    assert "std::uint32_t node_status_period_ms = 500U" in module_hpp
 
 
 def test_generation_rejects_invalid_cpp_names(tmp_path: Path):
