@@ -18,6 +18,7 @@ from .naming import is_cpp_identifier, is_cpp_qualified_identifier, to_pascal, t
 
 _MAX_NODE_NAME_BYTES = 80
 _NODE_NAME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+_ALIAS_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
 _GENERATED_DIR_NAME = "generated"
 
 
@@ -43,6 +44,8 @@ class GenerationConfig:
     class_name: str
     root_namespace: str
     node_name: str = "org.libxr.dronecan.generated"
+    default_can_alias: str = "can0"
+    default_timebase_alias: str = "timebase"
     default_node_id: int = 10
     default_node_status_period_ms: int = 1000
     core_module_id: str = "CaFeZn/dronecan_core"
@@ -72,6 +75,14 @@ class GenerationConfig:
             raise ValueError("node_name may only contain ASCII letters, digits, underscore, dot, and dash")
         if len(self.node_name.encode("utf-8")) > _MAX_NODE_NAME_BYTES:
             raise ValueError(f"node_name must be at most {_MAX_NODE_NAME_BYTES} UTF-8 bytes")
+        for field_name, alias in (
+            ("default_can_alias", self.default_can_alias),
+            ("default_timebase_alias", self.default_timebase_alias),
+        ):
+            if not alias:
+                raise ValueError(f"{field_name} must not be empty")
+            if any(ch not in _ALIAS_CHARS for ch in alias):
+                raise ValueError(f"{field_name} may only contain ASCII letters, digits, underscore, and dash")
         if not self.core_module_id or "/" not in self.core_module_id:
             raise ValueError("core_module_id must be a full XRobot module ID such as 'CaFeZn/dronecan_core'")
 
@@ -236,13 +247,13 @@ class ModuleRenderer:
             ),
             "constructor_args": [
                 {"node_id": self.cfg.default_node_id},
-                {"can_alias": "can0"},
-                {"timebase_alias": "timebase"},
+                {"can_alias": self.cfg.default_can_alias},
+                {"timebase_alias": self.cfg.default_timebase_alias},
                 {"node_name": self.cfg.node_name},
                 {"node_status_period_ms": self.cfg.default_node_status_period_ms},
             ],
             "template_args": [],
-            "required_hardware": "can0 timebase",
+            "required_hardware": f"{self.cfg.default_can_alias} {self.cfg.default_timebase_alias}",
             "depends": [self.cfg.core_module_id],
         }
         manifest = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).rstrip()
@@ -261,8 +272,8 @@ class ModuleRenderer:
                         "name": self.cfg.module_name,
                         "constructor_args": {
                             "node_id": self.cfg.default_node_id,
-                            "can_alias": "can0",
-                            "timebase_alias": "timebase",
+                            "can_alias": self.cfg.default_can_alias,
+                            "timebase_alias": self.cfg.default_timebase_alias,
                             "node_name": self.cfg.node_name,
                             "node_status_period_ms": self.cfg.default_node_status_period_ms,
                         },
@@ -426,16 +437,16 @@ class {self.cfg.class_name} final : public LibXR::Application
   {self.cfg.class_name}(LibXR::HardwareContainer& hw,
                         LibXR::ApplicationManager& appmgr,
                         std::uint8_t node_id = {self.cfg.default_node_id}U,
-                        const char* can_alias = "can0",
-                        const char* timebase_alias = "timebase",
+                        const char* can_alias = {_cpp_string_literal(self.cfg.default_can_alias)},
+                        const char* timebase_alias = {_cpp_string_literal(self.cfg.default_timebase_alias)},
                         const char* node_name = {_cpp_string_literal(self.cfg.node_name)},
                         std::uint32_t node_status_period_ms = {self.cfg.default_node_status_period_ms}U)
-      : can_(*hw.FindOrExit<LibXR::CAN>({{NormalizeCString(can_alias, "can0")}})),
-        timebase_(*hw.FindOrExit<LibXR::Timebase>({{NormalizeCString(timebase_alias, "timebase")}})),
+      : can_(*hw.FindOrExit<LibXR::CAN>({{NormalizeCString(can_alias, {_cpp_string_literal(self.cfg.default_can_alias)})}})),
+        timebase_(*hw.FindOrExit<LibXR::Timebase>({{NormalizeCString(timebase_alias, {_cpp_string_literal(self.cfg.default_timebase_alias)})}})),
         node_(can_, timebase_, node_arena_.data(), node_arena_.size(), MakeNodeConfig(node_status_period_ms)){init_handlers}
   {{
     char poller_alias[32]{{}};
-    MakePollerAlias(NormalizeCString(can_alias, "can0"), poller_alias, sizeof(poller_alias));
+    MakePollerAlias(NormalizeCString(can_alias, {_cpp_string_literal(self.cfg.default_can_alias)}), poller_alias, sizeof(poller_alias));
     can_poller_ = hw.Find<DroneCANCoreSupport::CanPoller>(
         {{poller_alias, "can_poller", "dronecan_poller", "can1_poller", "can0_poller"}});
     (void)node_.SetNodeID(node_id);
@@ -485,7 +496,7 @@ class {self.cfg.class_name} final : public LibXR::Application
     {{
       return;
     }}
-    const char* normalized = NormalizeCString(can_alias, "can0");
+    const char* normalized = NormalizeCString(can_alias, {_cpp_string_literal(self.cfg.default_can_alias)});
     (void)std::snprintf(out, out_size, "%s_poller", normalized);
     out[out_size - 1U] = '\\0';
   }}

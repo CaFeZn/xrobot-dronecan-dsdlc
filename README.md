@@ -80,6 +80,49 @@ xr_dronecan_dsdlc generate `
   --module-id dronecan_dsdl
 ```
 
+也可以用独立生成配置文件，适合 CI、脚本或暂时不想把生成字段放进
+`User/xrobot.yaml` 的项目：
+
+Alternatively, use a standalone generation config. This is useful for CI,
+scripts, or projects that do not want generation keys inside `User/xrobot.yaml`:
+
+```yaml
+# User/dronecan.yaml
+dronecan:
+  module:
+    name: dronecan_dsdl
+    class_name: DroneCANDsdl
+    root_namespace: DroneCANGeneratedDsdl
+    output: Modules/dronecan_dsdl
+    core_module_id: CaFeZn/dronecan_core
+
+  node:
+    default_node_id: 10
+    node_name: org.libxr.dronecan.generated
+    node_status_period_ms: 1000
+    can_alias: can0
+    timebase_alias: timebase
+
+  dsdl:
+    builtin: true
+    source_dirs: []
+    lookup_dirs: []
+    types:
+      - uavcan.equipment.indication.LightsCommand
+      - uavcan.protocol.dynamic_node_id.Allocation
+```
+
+```powershell
+xr_dronecan_dsdlc generate --config User/dronecan.yaml
+```
+
+命令行参数会覆盖 YAML 中的同类配置。例如同时传入 `--config` 和 `--type`
+时，输出类型列表以命令行 `--type` 为准。`--config` 和 `--xrobot-yaml` 互斥。
+
+Command-line options override matching YAML values. For example, when both
+`--config` and `--type` are provided, the emitted type list comes from `--type`.
+`--config` and `--xrobot-yaml` are mutually exclusive.
+
 ```powershell
 python -m pip install -e .
 xr_dronecan_dsdlc generate `

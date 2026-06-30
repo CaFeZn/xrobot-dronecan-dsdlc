@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("-I", "--lookup-dir", action="append", type=Path, default=[], help="额外 DSDL 查找根目录 / Additional DSDL lookup root")
     gen.add_argument("--builtin-dsdl", action="store_true", help="使用内置 DroneCAN DSDL 根目录 / Use bundled DroneCAN DSDL roots")
     gen.add_argument("--type", action="append", default=None, help="要输出的完整 DSDL 类型名，可重复；默认 uavcan.protocol.NodeStatus / Full DSDL type name to emit; repeatable; defaults to uavcan.protocol.NodeStatus")
+    gen.add_argument("--config", type=Path, help="从独立 YAML 文件读取 DSDL 生成配置 / Read generation config from a standalone YAML file")
     gen.add_argument("--xrobot-yaml", type=Path, help="从用户工程 XRobot YAML 读取 DSDL 生成配置 / Read generation config from project XRobot YAML")
     gen.add_argument("--module-id", help="XRobot YAML 中要读取的模块 id/name / Module id/name to read from XRobot YAML")
     gen.add_argument("-o", "--output", type=Path, help="生成模块输出目录 / Generated module output directory")
@@ -144,6 +145,62 @@ def _project_root_from_yaml(path: Path) -> Path:
     return path.parent
 
 
+def _resolve_path(value: Any, base: Path, context: str) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{context} must be a non-empty string")
+    path = Path(value)
+    return path if path.is_absolute() else base / path
+
+
+def _load_standalone_config(args: argparse.Namespace) -> dict[str, Any]:
+    if args.config is None:
+        return {}
+
+    config_path = args.config.resolve()
+    data = _load_project_yaml(config_path)
+    root = _as_dict(data.get("dronecan"), "dronecan")
+    module_cfg = _as_dict(root.get("module"), "dronecan.module")
+    node_cfg = _as_dict(root.get("node"), "dronecan.node")
+    dsdl_cfg = _as_dict(root.get("dsdl"), "dronecan.dsdl")
+    base = _project_root_from_yaml(config_path)
+
+    module_name = module_cfg.get("name")
+    if module_name is not None and (not isinstance(module_name, str) or not module_name):
+        raise ValueError("dronecan.module.name must be a non-empty string")
+
+    source_dirs = _path_list(dsdl_cfg.get("source_dirs"), base, "dronecan.dsdl.source_dirs")
+    include_builtin = dsdl_cfg.get("builtin")
+    if include_builtin is None:
+        include_builtin = not source_dirs
+
+    return {
+        "source_dirs": source_dirs,
+        "lookup_dirs": _path_list(dsdl_cfg.get("lookup_dirs"), base, "dronecan.dsdl.lookup_dirs"),
+        "include_builtin": bool(include_builtin),
+        "types": _string_list(dsdl_cfg.get("types"), "dronecan.dsdl.types"),
+        "output": _resolve_path(module_cfg.get("output"), base, "dronecan.module.output"),
+        "module_name": module_name,
+        "class_name": module_cfg.get("class_name"),
+        "root_namespace": module_cfg.get("root_namespace"),
+        "core_module_id": module_cfg.get("core_module_id"),
+        "node_id": (
+            _parse_uint_literal(node_cfg.get("default_node_id"), "dronecan.node.default_node_id")
+            if node_cfg.get("default_node_id") is not None
+            else None
+        ),
+        "node_status_period_ms": (
+            _parse_uint_literal(node_cfg.get("node_status_period_ms"), "dronecan.node.node_status_period_ms")
+            if node_cfg.get("node_status_period_ms") is not None
+            else None
+        ),
+        "can_alias": node_cfg.get("can_alias") if isinstance(node_cfg.get("can_alias"), str) else None,
+        "timebase_alias": node_cfg.get("timebase_alias") if isinstance(node_cfg.get("timebase_alias"), str) else None,
+        "node_name": node_cfg.get("node_name") if isinstance(node_cfg.get("node_name"), str) else None,
+    }
+
+
 def _load_yaml_generation(args: argparse.Namespace) -> dict[str, Any]:
     if args.xrobot_yaml is None:
         return {}
@@ -170,6 +227,8 @@ def _load_yaml_generation(args: argparse.Namespace) -> dict[str, Any]:
     node_id = _constructor_value(module, project, "node_id")
     node_status_period_ms = _constructor_value(module, project, "node_status_period_ms")
     node_name = _constructor_value(module, project, "node_name")
+    can_alias = _constructor_value(module, project, "can_alias")
+    timebase_alias = _constructor_value(module, project, "timebase_alias")
     source_dirs = _path_list(dsdl_cfg.get("source_dirs"), base, "module.generator.dsdl.source_dirs")
     include_builtin = dsdl_cfg.get("builtin")
     if include_builtin is None:
@@ -191,6 +250,8 @@ def _load_yaml_generation(args: argparse.Namespace) -> dict[str, Any]:
             if node_status_period_ms is not None
             else None
         ),
+        "can_alias": can_alias if isinstance(can_alias, str) else None,
+        "timebase_alias": timebase_alias if isinstance(timebase_alias, str) else None,
         "node_name": node_name if isinstance(node_name, str) else None,
     }
     return cfg
@@ -199,7 +260,10 @@ def _load_yaml_generation(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "generate":
-        yaml_cfg = _load_yaml_generation(args)
+        if args.config is not None and args.xrobot_yaml is not None:
+            raise ValueError("--config and --xrobot-yaml are mutually exclusive")
+
+        yaml_cfg = _load_standalone_config(args) if args.config is not None else _load_yaml_generation(args)
         source_dirs = list(yaml_cfg.get("source_dirs", [])) + list(args.dsdl_dir)
         lookup_dirs = list(yaml_cfg.get("lookup_dirs", [])) + list(args.lookup_dir)
         include_builtin = args.builtin_dsdl or bool(yaml_cfg.get("include_builtin", False))
@@ -218,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
             class_name=class_name,
             root_namespace=args.root_namespace or yaml_cfg.get("root_namespace") or "DroneCANGenerated",
             node_name=args.node_name or yaml_cfg.get("node_name") or "org.libxr.dronecan.generated",
+            default_can_alias=yaml_cfg.get("can_alias") or "can0",
+            default_timebase_alias=yaml_cfg.get("timebase_alias") or "timebase",
             default_node_id=args.node_id or yaml_cfg.get("node_id") or 10,
             default_node_status_period_ms=args.node_status_period_ms or yaml_cfg.get("node_status_period_ms") or 1000,
             core_module_id=args.core_module_id or yaml_cfg.get("core_module_id") or "CaFeZn/dronecan_core",

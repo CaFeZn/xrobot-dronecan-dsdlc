@@ -214,6 +214,112 @@ def test_cli_reads_generation_config_from_xrobot_yaml(tmp_path: Path):
     assert "using UavcanProtocolDynamicNodeIdAllocation" in module_hpp
 
 
+def test_cli_reads_standalone_generation_config(tmp_path: Path):
+    user_dir = tmp_path / "User"
+    user_dir.mkdir()
+    yaml_path = user_dir / "dronecan.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "dronecan": {
+                    "module": {
+                        "name": "dronecan_dsdl",
+                        "class_name": "DroneCANDsdl",
+                        "root_namespace": "DroneCANGeneratedDsdl",
+                        "output": "Modules/dronecan_dsdl",
+                        "core_module_id": "CaFeZn/dronecan_core",
+                    },
+                    "node": {
+                        "default_node_id": 42,
+                        "node_name": "org.xrobot.dronecan_led.v1",
+                        "node_status_period_ms": 1000,
+                        "can_alias": "can_custom",
+                        "timebase_alias": "time_custom",
+                    },
+                    "dsdl": {
+                        "builtin": True,
+                        "lookup_dirs": [],
+                        "types": [
+                            "uavcan.equipment.indication.LightsCommand",
+                            "uavcan.protocol.dynamic_node_id.Allocation",
+                        ],
+                    },
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["generate", "--config", str(yaml_path)])
+
+    out = tmp_path / "Modules" / "dronecan_dsdl"
+    assert result == 0
+    assert sorted(path.name for path in (out / "generated").glob("*.hpp")) == [
+        "dronecan_dsdl.hpp",
+        "dronecan_dsdl_dsdl_detail.hpp",
+        "uavcan_equipment_indication_lights_command.hpp",
+        "uavcan_equipment_indication_rg_b565.hpp",
+        "uavcan_equipment_indication_single_light_command.hpp",
+        "uavcan_protocol_dynamic_node_id_allocation.hpp",
+    ]
+
+    root_hpp = (out / "dronecan_dsdl.hpp").read_text(encoding="utf-8")
+    module_hpp = (out / "generated" / "dronecan_dsdl.hpp").read_text(encoding="utf-8")
+    assert "- node_id: 42" in root_hpp
+    assert "- can_alias: can_custom" in root_hpp
+    assert "- timebase_alias: time_custom" in root_hpp
+    assert "required_hardware: can_custom time_custom" in root_hpp
+    assert 'const char* can_alias = "can_custom"' in module_hpp
+    assert 'const char* timebase_alias = "time_custom"' in module_hpp
+    assert 'const char* node_name = "org.xrobot.dronecan_led.v1"' in module_hpp
+    assert "using UavcanEquipmentIndicationLightsCommand" in module_hpp
+
+
+def test_cli_overrides_standalone_config_types(tmp_path: Path):
+    yaml_path = tmp_path / "dronecan.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "dronecan": {
+                    "module": {
+                        "name": "dronecan_override",
+                        "class_name": "DroneCANOverride",
+                        "root_namespace": "DroneCANOverrideTypes",
+                        "output": "dronecan_override",
+                    },
+                    "dsdl": {
+                        "builtin": True,
+                        "types": ["uavcan.protocol.dynamic_node_id.Allocation"],
+                    },
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["generate", "--config", str(yaml_path), "--type", "uavcan.protocol.NodeStatus"])
+
+    out = tmp_path / "dronecan_override"
+    assert result == 0
+    assert sorted(path.name for path in (out / "generated").glob("*.hpp")) == [
+        "dronecan_override.hpp",
+        "dronecan_override_dsdl_detail.hpp",
+        "uavcan_protocol_node_status.hpp",
+    ]
+
+
+def test_cli_rejects_multiple_yaml_config_sources(tmp_path: Path):
+    config_path = tmp_path / "dronecan.yaml"
+    xrobot_path = tmp_path / "xrobot.yaml"
+    config_path.write_text("dronecan: {}\n", encoding="utf-8")
+    xrobot_path.write_text("modules: []\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        main(["generate", "--config", str(config_path), "--xrobot-yaml", str(xrobot_path)])
+
+
 def test_cli_xrobot_yaml_defaults_to_builtin_node_status(tmp_path: Path):
     user_dir = tmp_path / "user"
     user_dir.mkdir()
