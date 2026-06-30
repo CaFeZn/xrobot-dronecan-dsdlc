@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from .dsdl import load_dsdl
-from .generator import GenerationConfig, generate_module
+from .generator import GenerationConfig, TypeGenerationOptions, generate_module
 from .naming import to_pascal
 
 
@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--node-id", type=int, help="manifest 中的默认节点 ID / Default node ID in the manifest")
     gen.add_argument("--node-status-period-ms", type=int, help="默认 NodeStatus 周期 / Default NodeStatus period")
     gen.add_argument("--core-module-id", help="dronecan_core 的完整 XRobot 模块 ID / Full XRobot module ID for dronecan_core")
+    gen.add_argument("--mode", choices=["facade-own-node", "binding-only"], help="生成模式 / Generation mode")
     return parser
 
 
@@ -68,6 +69,48 @@ def _string_list(value: Any, context: str) -> list[str]:
     if not all(isinstance(item, str) and item for item in items):
         raise ValueError(f"{context} must contain non-empty strings")
     return list(items)
+
+
+def _bool_value(value: Any, default: bool, context: str) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{context} must be a boolean")
+
+
+def _parse_dsdl_api_options(dsdl_cfg: dict[str, Any], context: str) -> tuple[list[str], dict[str, TypeGenerationOptions]]:
+    requested = _string_list(dsdl_cfg.get("types"), f"{context}.types")
+    options: dict[str, TypeGenerationOptions] = {}
+
+    for index, item in enumerate(_as_list(dsdl_cfg.get("messages"), f"{context}.messages")):
+        entry = _as_dict(item, f"{context}.messages[{index}]")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{context}.messages[{index}].name must be a non-empty string")
+        requested.append(name)
+        options[name] = TypeGenerationOptions(
+            full_name=name,
+            message_rx=_bool_value(entry.get("rx"), True, f"{context}.messages[{index}].rx"),
+            message_tx=_bool_value(entry.get("tx"), True, f"{context}.messages[{index}].tx"),
+            message_callback=_bool_value(entry.get("callback"), True, f"{context}.messages[{index}].callback"),
+            message_topic=_bool_value(entry.get("topic"), False, f"{context}.messages[{index}].topic"),
+        )
+
+    for index, item in enumerate(_as_list(dsdl_cfg.get("services"), f"{context}.services")):
+        entry = _as_dict(item, f"{context}.services[{index}]")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{context}.services[{index}].name must be a non-empty string")
+        requested.append(name)
+        options[name] = TypeGenerationOptions(
+            full_name=name,
+            service_server=_bool_value(entry.get("server"), True, f"{context}.services[{index}].server"),
+            service_client=_bool_value(entry.get("client"), True, f"{context}.services[{index}].client"),
+            service_callback=_bool_value(entry.get("callback"), True, f"{context}.services[{index}].callback"),
+        )
+
+    return requested, options
 
 
 def _path_list(value: Any, base: Path, context: str) -> list[Path]:
@@ -174,17 +217,20 @@ def _load_standalone_config(args: argparse.Namespace) -> dict[str, Any]:
     include_builtin = dsdl_cfg.get("builtin")
     if include_builtin is None:
         include_builtin = not source_dirs
+    requested_types, type_options = _parse_dsdl_api_options(dsdl_cfg, "dronecan.dsdl")
 
     return {
         "source_dirs": source_dirs,
         "lookup_dirs": _path_list(dsdl_cfg.get("lookup_dirs"), base, "dronecan.dsdl.lookup_dirs"),
         "include_builtin": bool(include_builtin),
-        "types": _string_list(dsdl_cfg.get("types"), "dronecan.dsdl.types"),
+        "types": requested_types,
+        "type_options": type_options,
         "output": _resolve_path(module_cfg.get("output"), base, "dronecan.module.output"),
         "module_name": module_name,
         "class_name": module_cfg.get("class_name"),
         "root_namespace": module_cfg.get("root_namespace"),
         "core_module_id": module_cfg.get("core_module_id"),
+        "mode": module_cfg.get("mode"),
         "node_id": (
             _parse_uint_literal(node_cfg.get("default_node_id"), "dronecan.node.default_node_id")
             if node_cfg.get("default_node_id") is not None
@@ -233,17 +279,20 @@ def _load_yaml_generation(args: argparse.Namespace) -> dict[str, Any]:
     include_builtin = dsdl_cfg.get("builtin")
     if include_builtin is None:
         include_builtin = not source_dirs
+    requested_types, type_options = _parse_dsdl_api_options(dsdl_cfg, "module.generator.dsdl")
 
     cfg: dict[str, Any] = {
         "source_dirs": source_dirs,
         "lookup_dirs": _path_list(dsdl_cfg.get("lookup_dirs"), base, "module.generator.dsdl.lookup_dirs"),
         "include_builtin": bool(include_builtin),
-        "types": _string_list(dsdl_cfg.get("types"), "module.generator.dsdl.types"),
+        "types": requested_types,
+        "type_options": type_options,
         "output": output,
         "module_name": module_name,
         "class_name": dsdl_cfg.get("class_name"),
         "root_namespace": dsdl_cfg.get("root_namespace"),
         "core_module_id": dsdl_cfg.get("core_module_id"),
+        "mode": dsdl_cfg.get("mode") or generator.get("mode") or module.get("mode"),
         "node_id": _parse_uint_literal(node_id, "constructor_args.node_id") if node_id is not None else None,
         "node_status_period_ms": (
             _parse_uint_literal(node_status_period_ms, "constructor_args.node_status_period_ms")
@@ -268,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         lookup_dirs = list(yaml_cfg.get("lookup_dirs", [])) + list(args.lookup_dir)
         include_builtin = args.builtin_dsdl or bool(yaml_cfg.get("include_builtin", False))
         requested_types = args.type if args.type is not None else yaml_cfg.get("types") or ["uavcan.protocol.NodeStatus"]
+        type_options = {} if args.type is not None else yaml_cfg.get("type_options", {})
         module_name = args.module_name or yaml_cfg.get("module_name") or "dronecan_generated"
         output = args.output or yaml_cfg.get("output")
         if output is None:
@@ -281,12 +331,14 @@ def main(argv: list[str] | None = None) -> int:
             module_name=module_name,
             class_name=class_name,
             root_namespace=args.root_namespace or yaml_cfg.get("root_namespace") or "DroneCANGenerated",
+            mode=args.mode or yaml_cfg.get("mode") or "facade-own-node",
             node_name=args.node_name or yaml_cfg.get("node_name") or "org.libxr.dronecan.generated",
             default_can_alias=yaml_cfg.get("can_alias") or "can0",
             default_timebase_alias=yaml_cfg.get("timebase_alias") or "timebase",
             default_node_id=args.node_id or yaml_cfg.get("node_id") or 10,
             default_node_status_period_ms=args.node_status_period_ms or yaml_cfg.get("node_status_period_ms") or 1000,
             core_module_id=args.core_module_id or yaml_cfg.get("core_module_id") or "CaFeZn/dronecan_core",
+            type_options=type_options,
         )
         generate_module(cfg, selected)
         print(f"[OK] 已生成 {cfg.module_name}: {cfg.output} / Generated {cfg.module_name} at {cfg.output}")

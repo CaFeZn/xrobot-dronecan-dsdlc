@@ -310,6 +310,157 @@ def test_cli_overrides_standalone_config_types(tmp_path: Path):
     ]
 
 
+def test_cli_generates_binding_only_and_message_direction_pruning(tmp_path: Path):
+    yaml_path = tmp_path / "dronecan.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "dronecan": {
+                    "module": {
+                        "name": "dronecan_esc_binding",
+                        "class_name": "DroneCANEcsBinding",
+                        "root_namespace": "DroneCANEcsTypes",
+                        "output": "dronecan_esc_binding",
+                        "mode": "binding-only",
+                    },
+                    "dsdl": {
+                        "builtin": True,
+                        "messages": [
+                            {
+                                "name": "uavcan.equipment.esc.RawCommand",
+                                "rx": True,
+                                "tx": False,
+                                "callback": True,
+                                "topic": False,
+                            },
+                            {
+                                "name": "uavcan.equipment.esc.Status",
+                                "rx": False,
+                                "tx": True,
+                                "callback": False,
+                                "topic": False,
+                            },
+                        ],
+                    },
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["generate", "--config", str(yaml_path)])
+
+    out = tmp_path / "dronecan_esc_binding"
+    module_hpp = (out / "generated" / "dronecan_esc_binding.hpp").read_text(encoding="utf-8")
+    root_hpp = (out / "dronecan_esc_binding.hpp").read_text(encoding="utf-8")
+    assert result == 0
+    assert "class DroneCANEcsBinding final : public LibXR::Application" not in module_hpp
+    assert "explicit DroneCANEcsBinding(DroneCANCoreSupport::DroneCANNode& node)" in module_hpp
+    assert "LibXR::HardwareContainer" not in module_hpp
+    assert "LibXR::CAN&" not in module_hpp
+    assert "LibXR::Timebase&" not in module_hpp
+    assert "node_arena_" not in module_hpp
+    assert "void OnMonitor() override" not in module_hpp
+    assert "DroneCANCoreSupport::DroneCANNode node_;" not in module_hpp
+    assert "DroneCANCoreSupport::DroneCANNode& node_;" in module_hpp
+    assert "- node: '@dronecan_core'" in root_hpp
+
+    assert "RegisterTransferHandler(LibXR::DroneCAN::TransferKind::Message, ::DroneCANEcsTypes::uavcan::equipment::esc::RawCommand::kDataTypeId" in module_hpp
+    assert "RegisterTransferHandler(LibXR::DroneCAN::TransferKind::Message, ::DroneCANEcsTypes::uavcan::equipment::esc::Status::kDataTypeId" not in module_hpp
+    assert "SetUavcanEquipmentEscRawCommandCallback" in module_hpp
+    assert "SetUavcanEquipmentEscStatusCallback" not in module_hpp
+    assert "PublishUavcanEquipmentEscRawCommand" not in module_hpp
+    assert "PublishUavcanEquipmentEscStatus" in module_hpp
+
+
+def test_cli_generates_message_topics_when_enabled(tmp_path: Path):
+    yaml_path = tmp_path / "dronecan.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "dronecan": {
+                    "module": {
+                        "name": "dronecan_topic",
+                        "class_name": "DroneCANTopic",
+                        "root_namespace": "DroneCANTopicTypes",
+                        "output": "dronecan_topic",
+                    },
+                    "dsdl": {
+                        "builtin": True,
+                        "messages": [
+                            {
+                                "name": "uavcan.equipment.esc.RawCommand",
+                                "rx": True,
+                                "tx": True,
+                                "callback": False,
+                                "topic": True,
+                            }
+                        ],
+                    },
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["generate", "--config", str(yaml_path)])
+
+    module_hpp = (tmp_path / "dronecan_topic" / "generated" / "dronecan_topic.hpp").read_text(encoding="utf-8")
+    assert result == 0
+    assert "using UavcanEquipmentEscRawCommandTopicData = LibXR::DroneCAN::TopicMessage<" in module_hpp
+    assert 'kUavcanEquipmentEscRawCommandTopicName = "/dronecan/uavcan/equipment/esc/RawCommand"' in module_hpp
+    assert 'kUavcanEquipmentEscRawCommandTxTopicName = "/dronecan/tx/uavcan/equipment/esc/RawCommand"' in module_hpp
+    assert "UavcanEquipmentEscRawCommandTopicData topic_data{meta, decoded};" in module_hpp
+    assert "uavcan_equipment_esc_raw_command_topic_.Publish(topic_data);" in module_hpp
+    assert "uavcan_equipment_esc_raw_command_tx_topic_.RegisterCallback" in module_hpp
+    assert "OnUavcanEquipmentEscRawCommandTxTopic" in module_hpp
+    assert "SetUavcanEquipmentEscRawCommandCallback" not in module_hpp
+
+
+def test_cli_prunes_service_server_client_generation(tmp_path: Path):
+    yaml_path = tmp_path / "dronecan.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "dronecan": {
+                    "module": {
+                        "name": "dronecan_service",
+                        "class_name": "DroneCANService",
+                        "root_namespace": "DroneCANServiceTypes",
+                        "output": "dronecan_service",
+                    },
+                    "dsdl": {
+                        "builtin": True,
+                        "services": [
+                            {
+                                "name": "uavcan.protocol.GetNodeInfo",
+                                "server": True,
+                                "client": False,
+                                "callback": True,
+                            }
+                        ],
+                    },
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["generate", "--config", str(yaml_path)])
+
+    module_hpp = (tmp_path / "dronecan_service" / "generated" / "dronecan_service.hpp").read_text(encoding="utf-8")
+    assert result == 0
+    assert "RegisterTransferHandler(LibXR::DroneCAN::TransferKind::Request" in module_hpp
+    assert "RegisterTransferHandler(LibXR::DroneCAN::TransferKind::Response" not in module_hpp
+    assert "SetUavcanProtocolGetNodeInfoRequestCallback" in module_hpp
+    assert "SetUavcanProtocolGetNodeInfoResponseCallback" not in module_hpp
+    assert "RequestUavcanProtocolGetNodeInfoRequest" not in module_hpp
+    assert "RespondUavcanProtocolGetNodeInfoResponse" in module_hpp
+
+
 def test_cli_rejects_multiple_yaml_config_sources(tmp_path: Path):
     config_path = tmp_path / "dronecan.yaml"
     xrobot_path = tmp_path / "xrobot.yaml"

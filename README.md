@@ -123,6 +123,112 @@ Command-line options override matching YAML values. For example, when both
 `--config` and `--type` are provided, the emitted type list comes from `--type`.
 `--config` and `--xrobot-yaml` are mutually exclusive.
 
+## 生成模式 / Generation Modes
+
+默认模式是 `facade-own-node`：生成类继承 `LibXR::Application`，自己从
+`HardwareContainer` 查找 CAN/Timebase，持有 `DroneCANNode`，并在
+`OnMonitor()` 中轮询。这适合简单 demo 或单一 DroneCAN facade。
+
+The default mode is `facade-own-node`: the generated class derives from
+`LibXR::Application`, looks up CAN/Timebase from `HardwareContainer`, owns a
+`DroneCANNode`, and polls it from `OnMonitor()`. This fits simple demos or a
+single DroneCAN facade.
+
+`binding-only` 模式只接收外部 `DroneCANCoreSupport::DroneCANNode&`，不持有
+CAN、Timebase、arena 或 DroneCANNode，也不注册 Application。它适合多个 generated
+binding 共享同一个 `dronecan_core` 运行时。
+
+`binding-only` accepts an external `DroneCANCoreSupport::DroneCANNode&` only. It
+does not own CAN, Timebase, an arena, or a DroneCANNode, and it does not register
+an Application. Use it when multiple generated bindings should share one
+`dronecan_core` runtime.
+
+```yaml
+dronecan:
+  module:
+    name: dronecan_dsdl
+    class_name: DroneCANDsdl
+    root_namespace: DroneCANGeneratedDsdl
+    output: Modules/dronecan_dsdl
+    mode: binding-only
+  dsdl:
+    builtin: true
+    messages:
+      - name: uavcan.equipment.esc.RawCommand
+        rx: true
+        tx: false
+        callback: true
+        topic: false
+      - name: uavcan.equipment.esc.Status
+        rx: false
+        tx: true
+        callback: false
+        topic: false
+    services:
+      - name: uavcan.protocol.GetNodeInfo
+        server: true
+        client: false
+        callback: true
+```
+
+XRobot 工程中可以把共享 runtime 和 binding-only DSDL facade 分开实例化：
+
+In an XRobot project, instantiate the shared runtime and binding-only DSDL
+facade separately:
+
+```yaml
+modules:
+  - id: dronecan_core
+    name: DroneCANCoreModule
+    constructor_args:
+      node_id: 10
+      can_alias: can1
+      timebase_alias: timebase
+      node_name: org.libxr.dronecan
+      node_status_period_ms: 1000
+
+  - id: dronecan_dsdl
+    name: dronecan_dsdl
+    constructor_args:
+      node: "@dronecan_core"
+    generator:
+      dsdl:
+        mode: binding-only
+        builtin: true
+        messages:
+          - name: uavcan.equipment.esc.RawCommand
+            rx: true
+            tx: false
+            callback: true
+            topic: false
+          - name: uavcan.equipment.esc.Status
+            rx: false
+            tx: true
+            callback: false
+            topic: false
+```
+
+## API 裁剪 / API Pruning
+
+旧的 `types:` 列表仍然可用，并保持兼容：每个 message 默认生成 RX handler、
+callback setter 和 publish 方法；每个 service 默认生成 request/response 两侧 API。
+
+The legacy `types:` list remains supported and compatible: each message emits
+RX handlers, callback setters, and publish methods; each service emits both
+request/response sides.
+
+需要节省 ROM/RAM 或避免注册无用 handler 时，用 `messages:` / `services:` 精确声明：
+
+Use `messages:` / `services:` when ROM/RAM should be reduced or unused handlers
+should not be registered:
+
+- command 类 message 通常 `rx: true, tx: false, callback: true`。
+- status/event 类 message 通常 `rx: false, tx: true`。
+- 需要在 LibXR 内部转发的 message 可启用 `topic: true`；RX topic 名称为
+  `/dronecan/<type>`，TX topic 名称为 `/dronecan/tx/<type>`。
+- service server 端通常 `server: true, client: false, callback: true`。
+- service client 端通常 `server: false, client: true, callback: true`。
+
 ```powershell
 python -m pip install -e .
 xr_dronecan_dsdlc generate `
